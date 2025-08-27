@@ -16,7 +16,7 @@ class Settings:
     )
     GIGACHAT_SCOPE = os.getenv("GIGACHAT_SCOPE_FINBOT", "GIGACHAT_API_PERS")
     TELEGRAM_BOT_TOKEN = os.getenv(
-        "TELEGRAM_BOT_TOKEN_FINBOT", "8094072965:AAHWgpLlydBFQDVJRKpzsjK7Juy7TcrAGPw"
+        "TELEGRAM_BOT_TOKEN_FINBOT", "8094072965:"
     )
 
     INN_OKK_MAPPING_FILE_PATH = os.path.join(BASE_DIR, "data", "inn_okk_mapping.json")
