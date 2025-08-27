@@ -12,7 +12,7 @@ class Settings:
 
     GIGACHAT_CREDENTIALS = os.getenv(
         "GIGACHAT_CREDENTIALS_FINBOT",
-        "ZmMyN2VjYTctYjU5ZC00ODJmLWJmOGUtNjBmNjE0NWY1ODExOjc3NTg5NjhkLWNkMGUtNDQyNC1hYzg0LTVkYjZlNmE0YWJhYQ==",
+        "==",
     )
     GIGACHAT_SCOPE = os.getenv("GIGACHAT_SCOPE_FINBOT", "GIGACHAT_API_PERS")
     TELEGRAM_BOT_TOKEN = os.getenv(
