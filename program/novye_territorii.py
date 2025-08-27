@@ -34,16 +34,43 @@ async def check_novye_territorii_program(company_dossier: dict) -> dict:
     inn = company_dossier.get("inn", "N/A")
     log_prefix = f"[Новые территории, ИНН {inn}]"
     check_log = []
-    # --- ИЗМЕНЕНИЕ 2: Всегда начинаем с базового словаря ---
+    
     result = {
         "program_name": "Программа 'Новые территории' (СЭЗ)",
         "base_conditions": BASE_CONDITIONS_TEXT,
+        "analysis_data": {}
     }
 
     try:
-        # Шаг 1: Проверка в реестре СЭЗ
-        check_log.append("Шаг 1: Проверка нахождения компании в Едином реестре участников СЭЗ.")
+        # --- ШАГ 1 (НОВЫЙ): Ранний расчет ставки ---
+        check_log.append("Шаг 1: Расчет потенциальной льготной ставки на основе ключевой ставки ЦБ.")
+        key_rate_str = company_dossier.get("cbr_key_rate")
+        key_rate_date = company_dossier.get("cbr_key_rate_date")
         
+        rate_calculation_text = "Не удалось рассчитать ставку (нет данных от ЦБ)."
+        if key_rate_str and key_rate_date:
+            try:
+                ks = float(key_rate_str.replace(",", "."))
+                standard_rate = ks + 4.0
+                refund_rate = min(ks, 10.0)
+                final_rate = standard_rate - refund_rate
+                rate_calculation_text = (
+                    f"Ваша ставка является плавающей.\n"
+                    f"• Стандартная ставка: {ks:.2f}% (КС на {key_rate_date}) + 4.00% = {standard_rate:.2f}%.\n"
+                    f"• Государство возмещает {refund_rate:.2f}% (в размере КС, но не более 10%).\n"
+                    f"• **Ваша итоговая ставка: {final_rate:.2f}% годовых.**"
+                )
+                result["analysis_data"]["final_rate"] = final_rate
+                check_log.append(f"✅ РЕЗУЛЬТАТ: Потенциальная ставка успешно рассчитана.")
+            except (ValueError, TypeError):
+                check_log.append("❌ РЕЗУЛЬТАТ: Не удалось преобразовать ставку ЦБ в число.")
+        else:
+             check_log.append("❌ РЕЗУЛЬТАТ: Данные о ключевой ставке отсутствуют в досье.")
+        
+        result["analysis_data"]["rate_text"] = rate_calculation_text
+
+        # --- ШАГ 2: Проверка в реестре СЭЗ ---
+        check_log.append("Шаг 2: Проверка нахождения компании в Едином реестре участников СЭЗ.")
         sez_inns_set = await _get_sez_inns_cached()
         is_in_registry = inn in sez_inns_set
 
@@ -53,40 +80,16 @@ async def check_novye_territorii_program(company_dossier: dict) -> dict:
                 "passed": False,
                 "reason": "Компания не найдена в едином реестре участников свободной экономической зоны (СЭЗ).",
                 "check_log": check_log,
-                "calculated_conditions": None
             })
             return result
         check_log.append("✅ РЕЗУЛЬТАТ: Компания найдена в реестре СЭЗ.")
 
-        # Шаг 2: Расчет ставки
-        check_log.append("Шаг 2: Расчет льготной ставки на основе ключевой ставки ЦБ.")
-        key_rate_str = company_dossier.get("cbr_key_rate")
-        key_rate_date = company_dossier.get("cbr_key_rate_date")
-        
-        rate_calculation_text = "Не удалось рассчитать ставку (нет данных от ЦБ)."
-        if key_rate_str and key_rate_date:
-            try:
-                ks = float(key_rate_str.replace(",", "."))
-                standard_rate, refund_rate = ks + 4.0, min(ks, 10.0)
-                final_rate = standard_rate - refund_rate
-                rate_calculation_text = (
-                    f"Ваша ставка является плавающей.\n"
-                    f"• Стандартная ставка: {ks:.2f}% (КС на {key_rate_date}) + 4.00% = {standard_rate:.2f}%.\n"
-                    f"• Государство возмещает {refund_rate:.2f}% (в размере КС, но не более 10%).\n"
-                    f"• **Ваша итоговая ставка: {final_rate:.2f}% годовых.**"
-                )
-                check_log.append(f"✅ РЕЗУЛЬТАТ: Ставка успешно рассчитана.")
-            except (ValueError, TypeError):
-                check_log.append("❌ РЕЗУЛЬТАТ: Не удалось преобразовать ставку ЦБ в число.")
-        else:
-             check_log.append("❌ РЕЗУЛЬТАТ: Данные о ключевой ставке отсутствуют в досье.")
-
-        # --- Формирование УСПЕШНОГО ответа ---
+        # --- ШАГ 3: Формирование УСПЕШНОГО ответа ---
         calculated_conditions_text = (
             f"- Цели кредита: Реализация инвестпроекта в СЭЗ (до 20% на оборотные средства).\n"
             f"- Сумма кредита: От 1 млн до 5 млрд рублей.\n"
             f"- Срок: до 5 лет.\n"
-            f"- Льготная процентная ставка:\n{rate_calculation_text}"
+            f"- Льготная процентная ставка:\n{result['analysis_data']['rate_text']}"
         )
         manual_steps_text = (
             "- НЕОБХОДИМО ПРЕДОСТАВИТЬ действующий договор об условиях деятельности в СЭЗ.\n"
@@ -95,7 +98,7 @@ async def check_novye_territorii_program(company_dossier: dict) -> dict:
 
         result.update({
             "passed": True,
-            "calculated_conditions": calculated_conditions_text, # --- ИЗМЕНЕНИЕ 3: Переименовываем ключ
+            "calculated_conditions": calculated_conditions_text,
             "manual_steps": manual_steps_text,
             "check_log": check_log,
         })
@@ -108,6 +111,5 @@ async def check_novye_territorii_program(company_dossier: dict) -> dict:
             "passed": False,
             "reason": f"Внутренняя ошибка при проверке: {e}",
             "check_log": check_log,
-            "calculated_conditions": None
         })
         return result

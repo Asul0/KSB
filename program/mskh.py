@@ -119,208 +119,116 @@ async def check_msh_program(company_dossier: dict) -> dict:
     result = {
         "program_name": "Программа льготного кредитования 'МСХ'",
         "base_conditions": BASE_CONDITIONS_TEXT,
-        # -- Новые поля для структурированных данных --
         "analysis_data": {
-            "is_priority": False,
-            "subsidy_rate": 0.0,
-            "key_rate": 0.0,
-            "relevant_category": None,
-            "max_credit_limit": 0,
-            "calculated_subsidy": 0,
+            "is_priority": None, "subsidy_rate": 0.0, "key_rate": 0.0,
+            "relevant_category": None, "max_credit_limit": 0, "calculated_subsidy": 0,
+            "rate_text": "Ставка не рассчитана.", "subsidy_text": "Субсидия не рассчитана."
         },
     }
 
     try:
-        # Этапы 1-4 (проверки ЕГРЮЛ, ОКВЭД, статуса, учредителей) остаются без изменений
+        # --- ШАГ 1: Проверка базовых данных (ЕГРЮЛ, ОКВЭД) ---
         check_log.append("Шаг 1: Проверка наличия компании в ЕГРЮЛ и базовых данных.")
         if not company_dossier.get("is_in_egrul"):
-            result.update(
-                {
-                    "passed": False,
-                    "reason": "Компания не найдена в ЕГРЮЛ.",
-                    "check_log": check_log,
-                }
-            )
+            result.update({"passed": False, "reason": "Компания не найдена в ЕГРЮЛ.", "check_log": check_log})
             return result
-
         full_cheko_data = company_dossier.get("full_cheko_data", {})
         okved_data = full_cheko_data.get("okved_data", {})
         if not okved_data or not okved_data.get("main_okved"):
-            result.update(
-                {
-                    "passed": False,
-                    "reason": "Отсутствуют данные по ОКВЭД.",
-                    "check_log": check_log,
-                }
-            )
+            result.update({"passed": False, "reason": "Отсутствуют данные по ОКВЭД.", "check_log": check_log})
             return result
-        check_log.append(
-            "✅ РЕЗУЛЬТАТ: Компания найдена в ЕГРЮЛ, данные по ОКВЭД присутствуют."
-        )
-
-        check_log.append("Шаг 2: Проверка соответствия ОКВЭД требованиям программы.")
-        company_okveds_list = [okved_data["main_okved"]] + okved_data.get(
-            "additional_okved", []
-        )
+        check_log.append("✅ РЕЗУЛЬТАТ: Компания найдена, данные по ОКВЭД присутствуют.")
+        
+        # --- ШАГ 2: Ранний анализ ОКВЭД и расчеты ---
+        # Определяем категорию, приоритетность и выполняем расчеты ДО "жестких" проверок
+        check_log.append("Шаг 2: Анализ ОКВЭД и ранний расчет потенциальных условий.")
+        company_okveds_list = [okved_data["main_okved"]] + okved_data.get("additional_okved", [])
         company_okved_codes = {o["code"] for o in company_okveds_list}
         matched_codes = company_okved_codes.intersection(ALL_ALLOWED_OKVEDS)
-        if not matched_codes:
-            reason = "Ни один из ОКВЭД компании не соответствует требованиям программы."
-            result.update({"passed": False, "reason": reason, "check_log": check_log})
-            return result
-        check_log.append(
-            f"✅ РЕЗУЛЬТАТ: Найдены соответствующие ОКВЭД: {', '.join(matched_codes)}."
-        )
-
-        check_log.append(
-            "Шаг 3: Определение статуса ОКВЭД ('уточнение', 'приоритетный')."
-        )
-        clarification_okved_found = None
-        is_priority = False
+        
         relevant_category = "Не определена"
-        clarification_intersection = company_okved_codes.intersection(
-            ALLOWED_OKVEDS_CLARIFICATION
-        )
-        if clarification_intersection:
-            clarification_okved_found = next(iter(clarification_intersection))
-            check_log.append(
-                f"   - Обнаружен ОКВЭД, требующий уточнения: {clarification_okved_found}"
-            )
-        for okved in company_okveds_list:
-            if okved["code"] in matched_codes:
-                relevant_category = OKVED_TO_CATEGORY_MAP.get(okved["code"], "Прочее")
-                if relevant_category in PRIORITY_OKVED_CATEGORIES_MSH:
-                    is_priority = True
-                check_log.append(
-                    f"   - Определена релевантная категория '{relevant_category}' (Приоритет: {is_priority})."
-                )
-                break
-
+        is_priority = False
+        if matched_codes:
+            for okved in company_okveds_list:
+                if okved["code"] in matched_codes:
+                    relevant_category = OKVED_TO_CATEGORY_MAP.get(okved["code"], "Прочее")
+                    if relevant_category in PRIORITY_OKVED_CATEGORIES_MSH:
+                        is_priority = True
+                    break
         result["analysis_data"]["relevant_category"] = relevant_category
         result["analysis_data"]["is_priority"] = is_priority
-
-        check_log.append(
-            "Шаг 4: Проверка доли иностранных учредителей из офшорных зон."
-        )
-        founders_data = full_cheko_data.get("founders_data", [])
-        foreign_share = sum(
-            float(re.search(r"(\d+[.,]?\d*)\s*%", line).group(1).replace(",", "."))
-            for line in founders_data
-            if "Россия" not in line
-            and any(c in line for c in ["Кипр", "Сейшелы", "Белиз"])
-            and re.search(r"(\d+[.,]?\d*)\s*%", line)
-        )
-        if foreign_share > 25.0:
-            reason = f"Доля иностранных учредителей из офшорных зон превышает 25% ({foreign_share}%)."
-            result.update({"passed": False, "reason": reason, "check_log": check_log})
-            return result
-        check_log.append(
-            f"✅ РЕЗУЛЬТАТ: Доля офшоров ({foreign_share}%) не превышает 25%."
-        )
-
-        # --- ВСЕ ЖЕСТКИЕ ПРОВЕРКИ ПРОЙДЕНЫ, ТЕПЕРЬ СОБИРАЕМ ИНФОРМАЦИЮ ---
-
-        # Этап 5: Расчет ставки
-        check_log.append("Шаг 5: Расчет ставки.")
+        check_log.append(f"   - Определена категория '{relevant_category}' (Приоритет: {is_priority}).")
+        
+        # Расчет ставки
         key_rate_str = company_dossier.get("cbr_key_rate")
         key_rate_date = company_dossier.get("cbr_key_rate_date")
-        rate_calculation_text = (
-            "Точная ставка определяется индивидуально уполномоченным банком."
-        )
         ks = 0.0
-        if key_rate_str and key_rate_date:
+        if key_rate_str:
             try:
                 ks = float(key_rate_str.replace(",", "."))
                 result["analysis_data"]["key_rate"] = ks
                 main_okved_code = okved_data["main_okved"]["code"]
                 if main_okved_code in MEDICAL_FOOD_OKVEDS:
-                    final_rate = 2.0
-                    rate_description = f"Для вашего ОКВЭД ({main_okved_code}) действует **фиксированная ставка: {final_rate:.2f}% годовых** (исключение для производства лечебного/детского питания)."
+                    final_rate, rate_desc = 2.0, f"**фиксированная ставка: 2.00% годовых**"
                 elif is_priority:
                     final_rate = 0.3 * ks + 2.0
-                    rate_description = f"Ваше направление '{relevant_category}' является приоритетным. Расчет ставки:\n(0.3 * {ks:.2f}% КС) + 2% = **{final_rate:.2f}% годовых**."
+                    rate_desc = f"(0.3 * {ks:.2f}% КС) + 2% = **{final_rate:.2f}% годовых**."
                 else:
                     final_rate = 0.5 * ks + 2.0
-                    rate_description = f"Ваше направление '{relevant_category}' не является приоритетным. Расчет ставки:\n(0.5 * {ks:.2f}% КС) + 2% = **{final_rate:.2f}% годовых**."
-                rate_calculation_text = f"Ваша процентная ставка рассчитывается от Ключевой Ставки ЦБ ({ks:.2f}% на {key_rate_date}).\n{rate_description}"
-                check_log.append("✅ РЕЗУЛЬТАТ: Ставка успешно рассчитана.")
-            except (ValueError, TypeError):
-                check_log.append(
-                    "❌ РЕЗУЛЬТАТ: Не удалось преобразовать ставку ЦБ в число."
-                )
-
-        # Этап 6: Формирование текста для ручной проверки и примечаний
-        check_log.append("Шаг 6: Формирование текста для ручной проверки и примечаний.")
-        manual_steps_text = "- Предоставить в банк справки: об отсутствии задолженности (ФНС), о статусе сельхозтоваропроизводителя (форма 6-АПК).\n"
-
-        # Этап 7: <<< НОВЫЙ БЛОК: Расчет размера субсидии >>>
-        check_log.append("Шаг 7: Расчет размера субсидии.")
-        general_info = full_cheko_data.get("general_info", {})
-        company_region = _get_company_region(general_info.get("address"))
-
-        subsidy_note = "- Расчетный размер годовой субсидии не может быть определен (отсутствуют данные о лимитах для региона)."
+                    rate_desc = f"(0.5 * {ks:.2f}% КС) + 2% = **{final_rate:.2f}% годовых**."
+                result["analysis_data"]["rate_text"] = f"Ставка от Ключевой Ставки ЦБ ({ks:.2f}% на {key_rate_date}).\nРасчет: {rate_desc}"
+            except (ValueError, TypeError): pass
+        
+        # Расчет субсидии
+        company_region = _get_company_region(full_cheko_data.get("general_info", {}).get("address"))
         if company_region and CREDIT_LIMITS_DATA and ks > 0:
             region_limits = CREDIT_LIMITS_DATA.get(company_region)
             if region_limits:
                 credit_limit = region_limits.get(relevant_category)
                 if credit_limit:
-
                     result["analysis_data"]["max_credit_limit"] = credit_limit
                     main_okved_code = okved_data["main_okved"]["code"]
-                    subsidy_amount = 0.0
-                    subsidy_rate = 0.0
-
-                    if main_okved_code in MEDICAL_FOOD_OKVEDS:
-                        subsidy_rate = 1.0
-                    elif is_priority:
-                        subsidy_rate = 0.7
-                    else:
-                        subsidy_rate = 0.5
-
+                    subsidy_rate = 1.0 if main_okved_code in MEDICAL_FOOD_OKVEDS else (0.7 if is_priority else 0.5)
                     subsidy_amount = subsidy_rate * (ks / 100) * credit_limit
                     result["analysis_data"]["subsidy_rate"] = subsidy_rate
                     result["analysis_data"]["calculated_subsidy"] = subsidy_amount
+                    result["analysis_data"]["subsidy_text"] = f"**{subsidy_amount:,.2f} рублей**.".replace(",", " ")
 
-                    subsidy_note = f"- Расчетный размер годовой субсидии: **{subsidy_amount:,.2f} рублей**.".replace(
-                        ",", " "
-                    )
-                    check_log.append(f"   - Субсидия рассчитана: {subsidy_note}")
-                else:
-                    subsidy_note = f"- Расчетный размер годовой субсидии не может быть определен (для категории '{relevant_category}' в регионе '{company_region}' не указан лимит кредита)."
-                    check_log.append(f"   - {subsidy_note}")
-            else:
-                subsidy_note = f"- Расчетный размер годовой субсидии не может быть определен (данные по региону '{company_region}' отсутствуют в базе лимитов)."
-                check_log.append(f"   - {subsidy_note}")
+        # --- ШАГ 3: Проверка соответствия ОКВЭД ---
+        check_log.append("Шаг 3: Проверка соответствия ОКВЭД требованиям программы.")
+        if not matched_codes:
+            reason = "Ни один из ОКВЭД компании не соответствует требованиям программы."
+            result.update({"passed": False, "reason": reason, "check_log": check_log})
+            return result
+        check_log.append(f"✅ РЕЗУЛЬТАТ: Найдены соответствующие ОКВЭД: {', '.join(matched_codes)}.")
 
-        manual_steps_text += subsidy_note
+        # --- ШАГ 4: Проверка доли иностранных учредителей ---
+        check_log.append("Шаг 4: Проверка доли иностранных учредителей из офшорных зон.")
+        founders_data = full_cheko_data.get("founders_data", [])
+        foreign_share = sum(float(re.search(r"(\d+[.,]?\d*)\s*%", line).group(1).replace(",", ".")) for line in founders_data if "Россия" not in line and any(c in line for c in ["Кипр", "Сейшелы", "Белиз"]) and re.search(r"(\d+[.,]?\d*)\s*%", line))
+        if foreign_share > 25.0:
+            reason = f"Доля иностранных учредителей из офшорных зон превышает 25% ({foreign_share}%)."
+            result.update({"passed": False, "reason": reason, "check_log": check_log})
+            return result
+        check_log.append(f"✅ РЕЗУЛЬТАТ: Доля офшоров ({foreign_share}%) не превышает 25%.")
 
-        if clarification_okved_found:
-            manual_steps_text += f"\n- **ВАЖНО (Уточнение):** Обнаружен ОКВЭД `{clarification_okved_found}`, который может потребовать дополнительного согласования с банком."
-
-        link_url = (
-            "https://mcx.gov.ru/activity/state-support/measures/preferential-credit/"
-        )
-        manual_steps_text += f"\n\nДополнительно: Более подробно с направлениями целевого использования можете ознакомиться по [ссылке]({link_url})."
-
-        # Этап 8: Финальный успешный результат
-        result.update(
-            {
-                "passed": True,
-                "calculated_conditions": rate_calculation_text,
-                "manual_steps": manual_steps_text,
-                "check_log": check_log,
-            }
-        )
+        # --- ШАГ 5: Формирование успешного ответа ---
+        manual_steps_text = "- Предоставить в банк справки: об отсутствии задолженности (ФНС), о статусе сельхозтоваропроизводителя (форма 6-АПК).\n"
+        manual_steps_text += f"- Расчетный размер годовой субсидии: {result['analysis_data']['subsidy_text']}"
+        if company_okved_codes.intersection(ALLOWED_OKVEDS_CLARIFICATION):
+            manual_steps_text += f"\n- **ВАЖНО:** Обнаружен ОКВЭД `{next(iter(company_okved_codes.intersection(ALLOWED_OKVEDS_CLARIFICATION)))}`, который может потребовать доп. согласования."
+        manual_steps_text += "\n\nДополнительно: Подробнее с направлениями целевого использования можно ознакомиться по [ссылке](https://mcx.gov.ru/activity/state-support/measures/preferential-credit/)."
+        
+        result.update({
+            "passed": True,
+            "calculated_conditions": result['analysis_data']['rate_text'],
+            "manual_steps": manual_steps_text,
+            "check_log": check_log,
+        })
         return result
 
     except Exception as e:
         logging.error(f"{log_prefix} Непредвиденная ошибка: {e}", exc_info=True)
         check_log.append(f"❌ КРИТИЧЕСКАЯ ОШИБКА: {e}")
-        result.update(
-            {
-                "passed": False,
-                "reason": f"Внутренняя ошибка при проверке: {e}",
-                "check_log": check_log,
-            }
-        )
+        result.update({"passed": False, "reason": f"Внутренняя ошибка при проверке: {e}", "check_log": check_log})
         return result

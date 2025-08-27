@@ -135,56 +135,27 @@ BASE_CONDITIONS_TEXT = """
 
 # Основная функция check_sovmeshchennaya_program остается без изменений,
 # так как вся логика инкапсулирована в _check_okved_rules
+
 async def check_sovmeshchennaya_program(company_dossier: dict) -> dict:
     inn = company_dossier.get("inn", "N/A")
     log_prefix = f"[Совмещенная, ИНН {inn}]"
     check_log = []
+    
     result = {
         "program_name": "МЭР-2025 'Совмещенная' (Комбо 2.0)",
         "base_conditions": BASE_CONDITIONS_TEXT,
+        "analysis_data": {}
     }
 
     try:
-        # Шаг 1: Проверка в реестре МСП
-        check_log.append("Шаг 1: Проверка в Едином реестре субъектов МСП.")
         msp_category = company_dossier.get("msp_category")
+        clean_msp_category = msp_category.replace("\n", " ").strip().lower() if msp_category else None
 
-        if not msp_category:
-            check_log.append("❌ РЕЗУЛЬТАТ: Компания не найдена в реестре МСП.")
-            result.update({
-                "passed": False,
-                "reason": "Компания не найдена в Едином реестре субъектов МСП.",
-                "check_log": check_log, "calculated_conditions": None
-            })
-            return result
-            
-        clean_msp_category = msp_category.replace("\n", " ").strip().lower()
-        check_log.append(f"✅ РЕЗУЛЬТАТ: Компания найдена, категория - '{clean_msp_category}'.")
-
-        # Шаг 2: Проверка ОКВЭД
-        check_log.append("Шаг 2: Проверка ОКВЭД на соответствие правилам программы.")
-        okved_data = company_dossier.get("full_cheko_data", {}).get("okved_data")
-        
-        if not okved_data or not okved_data.get("main_okved"):
-            check_log.append("❌ РЕЗУЛЬТАТ: Данные по ОКВЭД отсутствуют в досье.")
-            result.update({"passed": False, "reason": "Не удалось получить данные по ОКВЭД.", "check_log": check_log, "calculated_conditions": None})
-            return result
-
-        main_okved = okved_data["main_okved"]
-        all_okveds = [(main_okved["code"], main_okved["name"])] + [(i["code"], i["name"]) for i in okved_data.get("additional_okved", [])]
-
-        # Вызываем новую, умную функцию проверки
-        okved_result = _check_okved_rules(all_okveds, main_okved["code"], main_okved["name"])
-        if not okved_result["passed"]:
-            check_log.append(f"❌ РЕЗУЛЬТАТ: {okved_result['reason']}")
-            result.update({**okved_result, "check_log": check_log, "calculated_conditions": None})
-            return result
-        check_log.append("✅ РЕЗУЛЬТАТ: ОКВЭДы соответствуют требованиям программы.")
-        
-        # Шаг 3: Расчет лимита и ставки
-        check_log.append("Шаг 3: Расчет кредитного лимита и льготной ставки.")
+        # --- ШАГ 1 (НОВЫЙ): Ранний расчет лимита и ставки ---
+        check_log.append("Шаг 1: Расчет потенциального кредитного лимита и льготной ставки.")
         limit_map = {"микропредприятие": "200 млн рублей", "малое предприятие": "500 млн рублей", "среднее предприятие": "2 млрд рублей"}
-        credit_limit_text = limit_map.get(clean_msp_category, "не определен")
+        credit_limit_text = limit_map.get(clean_msp_category, "не определен") if clean_msp_category else "не определен"
+        result["analysis_data"]["credit_limit_text"] = credit_limit_text
         check_log.append(f"   - Лимит для категории '{clean_msp_category}' составляет {credit_limit_text}.")
 
         key_rate_str = company_dossier.get("cbr_key_rate")
@@ -196,40 +167,48 @@ async def check_sovmeshchennaya_program(company_dossier: dict) -> dict:
                 final_rate = (ks - 3.5) if ks > 12 else max(3.0, ks - 2.5)
                 calc_info = f"КС ({ks:.1f}%) > 12%, ставка = КС - 3.5%" if ks > 12 else f"КС ({ks:.1f}%) <= 12%, ставка = max(3%, КС - 2.5%)"
                 rate_text = f"**{final_rate:.2f}%** годовых ({calc_info})."
-                check_log.append(f"   - Ставка рассчитана на основе КС={ks}%. Итог: {final_rate:.2f}%.")
-            except Exception:
-                check_log.append("   - Ошибка при расчете ставки.")
-        else:
-            check_log.append("   - Данные о ключевой ставке отсутствуют в досье.")
+                result["analysis_data"]["final_rate"] = final_rate
+            except Exception: pass
+        result["analysis_data"]["rate_text"] = rate_text
+        check_log.append(f"   - Потенциальная ставка: {rate_text}")
+
+        # --- ШАГ 2: Проверка в реестре МСП ---
+        check_log.append("Шаг 2: Проверка в Едином реестре субъектов МСП.")
+        if not msp_category:
+            check_log.append("❌ РЕЗУЛЬТАТ: Компания не найдена в реестре МСП.")
+            result.update({"passed": False, "reason": "Компания не найдена в Едином реестре субъектов МСП.", "check_log": check_log})
+            return result
+        check_log.append(f"✅ РЕЗУЛЬТАТ: Компания найдена, категория - '{clean_msp_category}'.")
+
+        # --- ШАГ 3: Проверка ОКВЭД ---
+        check_log.append("Шаг 3: Проверка ОКВЭД на соответствие правилам программы.")
+        okved_data = company_dossier.get("full_cheko_data", {}).get("okved_data")
+        if not okved_data or not okved_data.get("main_okved"):
+            result.update({"passed": False, "reason": "Не удалось получить данные по ОКВЭД.", "check_log": check_log})
+            return result
+        main_okved = okved_data["main_okved"]
+        all_okveds = [(main_okved["code"], main_okved["name"])] + [(i["code"], i["name"]) for i in okved_data.get("additional_okved", [])]
+        okved_result = _check_okved_rules(all_okveds, main_okved["code"], main_okved["name"])
+        if not okved_result["passed"]:
+            check_log.append(f"❌ РЕЗУЛЬТАТ: {okved_result['reason']}")
+            result.update({**okved_result, "check_log": check_log})
+            return result
+        check_log.append("✅ РЕЗУЛЬТАТ: ОКВЭДы соответствуют требованиям программы.")
         
-        # --- Формирование УСПЕШНОГО ответа ---
+        # --- ШАГ 4: Формирование УСПЕШНОГО ответа ---
         calculated_conditions = (
             f"- Цель кредита: Инвестиционные цели (до 20% на оборотные средства).\n"
-            f"- Сумма кредита: От 50 млн до **{credit_limit_text}** (категория '{clean_msp_category}').\n"
+            f"- Сумма кредита: От 50 млн до **{result['analysis_data']['credit_limit_text']}** (категория '{clean_msp_category}').\n"
             f"- Срок: До 10 лет (субсидия на 5 лет).\n"
-            f"- Льготная процентная ставка: {rate_text}"
+            f"- Льготная процентная ставка: {result['analysis_data']['rate_text']}"
         )
-        manual_steps = (
-            "- Необходимо предоставить в банк:\n"
-            "  • Учредительные документы.\n"
-            "  • Документы для подтверждения отсутствия банкротства и структуры собственности."
-        )
+        manual_steps = "- Необходимо предоставить в банк:\n  • Учредительные документы.\n  • Документы для подтверждения отсутствия банкротства и структуры собственности."
 
-        result.update({
-            "passed": True,
-            "calculated_conditions": calculated_conditions,
-            "manual_steps": manual_steps,
-            "check_log": check_log
-        })
+        result.update({"passed": True, "calculated_conditions": calculated_conditions, "manual_steps": manual_steps, "check_log": check_log})
         return result
 
     except Exception as e:
         logging.error(f"{log_prefix} Непредвиденная ошибка: {e}", exc_info=True)
         check_log.append(f"❌ КРИТИЧЕСКАЯ ОШИБКА: {e}")
-        result.update({
-            "passed": False,
-            "reason": f"Произошла внутренняя ошибка при проверке: {e}",
-            "check_log": check_log,
-            "calculated_conditions": None
-        })
+        result.update({"passed": False, "reason": f"Произошла внутренняя ошибка при проверке: {e}", "check_log": check_log})
         return result
