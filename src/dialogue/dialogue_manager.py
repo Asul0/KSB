@@ -27,6 +27,16 @@ from langchain_core.messages import SystemMessage, HumanMessage
 logger = logging.getLogger(__name__)
 
 
+try:
+    with open("data/msh_okveds.json", "r", encoding="utf-8") as f:
+        ANALYTICS_DATA = {item["category"]: item for item in json.load(f)}
+except FileNotFoundError:
+    logger.error(
+        "Критическая ошибка: Файл с аналитикой 'data/msh_okveds.json' не найден!"
+    )
+    ANALYTICS_DATA = {}
+
+
 class DialogueManager:
     def __init__(self):
         self.giga_nlu = GigaChatNLU()
@@ -138,103 +148,150 @@ class DialogueManager:
             return f"Не удалось получить данные для компании с ИНН {inn}. Причина: {company_data['error']}"
 
         company_name = company_data.get("company_name", f"Компания с ИНН {inn}")
-
         address = company_data.get("general_info", {}).get("address", "")
         company_region = _get_company_region(address)
         state["company_region"] = company_region
-        logger.info(f"Для ИНН {inn} определен и сохранен регион: {company_region}")
-
         main_okved_info = company_data.get("okved_data", {}).get("main_okved", {})
         okved_code = main_okved_info.get("code", "Не определен")
 
-        # --- ШАГ 1-3: Параллельный запуск всех асинхронных инструментов ---
-        logger.info("Запускаю параллельный сбор данных из всех источников...")
-
-        # Создаем задачи для асинхронного выполнения
-        task_agroinvestor = asyncio.create_task(get_latest_agro_news())
-        task_ria_news = asyncio.create_task(get_ria_news_async())
-
-        # <<< ИСПРАВЛЕНИЕ ЗДЕСЬ: Возвращаем вызов к оригинальному виду (1 аргумент вместо 2) >>>
-        task_programs = asyncio.create_task(run_state_programs_check(inn))
-
-        # Ожидаем завершения всех асинхронных задач
-        agroinvestor_report, ria_news_report, programs_report = await asyncio.gather(
-            task_agroinvestor, task_ria_news, task_programs
-        )
-
-        # Синхронный вызов генератора прогнозов
-        price_forecast_summary = generate_price_forecast(okved_code)
         from parser.forecast_generator import find_category_by_okved
 
         okved_category = find_category_by_okved(okved_code)
+        logger.info(f"Для ИНН {inn} определена категория: '{okved_category}'")
+
+        # --- ШАГ 1-3: КОНТЕКСТНО-ЗАВИСИМЫЙ СБОР ДАННЫХ ---
+
+        # <<< КЛЮЧЕВОЕ ИЗМЕНЕНИЕ: Логика ветвления ДО запуска парсеров >>>
+
+        # Задачи, которые выполняются всегда
+        task_programs = asyncio.create_task(run_state_programs_check(inn))
+
+        # Инициализируем переменные для новостей
+        agroinvestor_report = {"status": "skipped", "data": []}
+        ria_news_report = {"status": "skipped", "data": []}
+        price_forecast_summary = ""
+        news_block_content = []
+
+        # Список категорий-исключений, для которых работает старая логика
+        parser_exceptions = [
+            "Растениеводство",
+            "Производство мукомольной и крахмальной продукции",
+        ]
+
+        if okved_category in parser_exceptions:
+            logger.info(
+                f"Категория '{okved_category}' в списке исключений. Запускаю внешние парсеры."
+            )
+            task_agroinvestor = asyncio.create_task(get_latest_agro_news())
+            task_ria_news = asyncio.create_task(get_ria_news_async())
+
+            # Ожидаем завершения парсеров вместе с госпрограммами
+            agroinvestor_report, ria_news_report, programs_report = (
+                await asyncio.gather(task_agroinvestor, task_ria_news, task_programs)
+            )
+            # --- Формируем старый блок новостей ---
+            # Блок 1: Агроинвестор
+            news_block_content.append(
+                "--- **1. САМОЕ ИНТЕРЕСНОЕ В АПК ЗА ПОСЛЕДНЕЕ ВРЕМЯ (Агроинвестор)** ---"
+            )
+            agro_news = agroinvestor_report.get("data", [])
+            if agroinvestor_report.get("status") == "success" and agro_news:
+                for news_item in agro_news[:3]:
+                    news_block_content.append(
+                        f"📰 {news_item.get('title', 'Без заголовка')}"
+                    )
+            else:
+                news_block_content.append(
+                    "Не удалось получить свежие новости от 'Агроинвестора'."
+                )
+
+            # Блок 2: РИА Новости
+            news_block_content.append(
+                "\n\n--- **2. АКТУАЛЬНЫЕ НОВОСТИ ПО ПРОГНОЗУ УРОЖАЯ (РИА Новости)** ---"
+            )
+            ria_news = ria_news_report.get("data", [])
+            if ria_news_report.get("status") == "success" and ria_news:
+                for news_item in ria_news:
+                    news_block_content.append(
+                        f"📰 **{news_item.get('title', 'Без заголовка')}**"
+                    )
+                    news_block_content.append(
+                        f"   **Источник:** {news_item.get('full_article_url', 'Не указан')}"
+                    )
+            else:
+                news_block_content.append(
+                    "Не удалось получить новости по прогнозу урожая."
+                )
+
+        else:
+            logger.info(
+                f"Стандартная категория '{okved_category}'. Загружаю аналитику из файла."
+            )
+            # Ожидаем завершения только одной обязательной задачи
+            programs_report = await task_programs
+
+            # --- Формируем НОВЫЙ блок с аналитикой ---
+            category_data = ANALYTICS_DATA.get(okved_category)
+            if category_data and category_data.get("article"):
+                full_article = category_data["article"]
+                # Простое создание выжимки: берем первые 3-4 предложения
+                sentences = full_article.split(".")
+                summary_text = ". ".join(sentences[:4]).strip() + "."
+
+                news_block_content.append(
+                    f"--- **ОТРАСЛЕВОЙ АНАЛИТИЧЕСКИЙ ОБЗОР: {okved_category.upper()}** ---"
+                )
+                news_block_content.append(summary_text)
+                if category_data.get("link"):
+                    news_block_content.append(
+                        f"\n   **Источник для подробного изучения:** {category_data['link']}"
+                    )
+            else:
+                news_block_content.append("--- **ОТРАСЛЕВОЙ АНАЛИТИЧЕСКИЙ ОБЗОР** ---")
+                news_block_content.append(
+                    "Аналитическая справка для данной категории находится в процессе подготовки."
+                )
+
+        # Генерация прогноза цен (если нужна)
+        price_forecast_summary = generate_price_forecast(okved_code)
 
         # --- ШАГ 4: Сохранение полного отчета в "память" ассистента ---
         full_report = {
             "company_info": company_data,
-            "agroinvestor_news": agroinvestor_report.get("data", []),
+            "agroinvestor_news": agroinvestor_report.get(
+                "data", []
+            ),  # Сохраняем, даже если пустые
             "ria_news_forecast": ria_news_report.get("data", []),
             "price_forecast_summary": price_forecast_summary,
             "programs_analysis": programs_report,
+            # <<< НОВОЕ ПОЛЕ: Сохраняем аналитику для будущих запросов >>>
+            "analytics_article": ANALYTICS_DATA.get(okved_category, {}).get(
+                "article", ""
+            ),
         }
         state["current_inn"] = inn
         state["company_name"] = company_name
         state["analysis_report"] = full_report
         state["history"] = []
 
-        # --- ШАГ 5: Формирование отчета для пользователя (остается без изменений) ---
+        # --- ШАГ 5: Формирование финального отчета для пользователя ---
         response_parts = [
             f"✅ **Комплексный анализ для «{company_name}» (ИНН: {inn})**\n"
         ]
 
-        # --- Блок 1: Агроинвестор (выводится всегда) ---
-        response_parts.append(
-            "--- **1. САМОЕ ИНТЕРЕСНОЕ В АПК ЗА ПОСЛЕДНЕЕ ВРЕМЯ (Агроинвестор)** ---"
-        )
-        agro_news = agroinvestor_report.get("data", [])
-        if agroinvestor_report.get("status") == "success" and agro_news:
-            for news_item in agro_news[:3]:  # Берем первые 3
-                response_parts.append(f"📰 {news_item.get('title', 'Без заголовка')}")
-            # Добавляем общую ссылку на подборку
-            if agro_news[0].get("summary"):  # Хитрый способ найти ссылку на подборку
-                source_link = agro_news[0]["full_article_url"].split("/news/")[0]
-                response_parts.append(f"\n   **Источник подборки:** {source_link}")
-        else:
-            response_parts.append(
-                "Не удалось получить свежие новости от 'Агроинвестора'."
-            )
+        # Добавляем наш динамически созданный новостной блок
+        response_parts.extend(news_block_content)
 
-        # --- Блок 2: Прогноз урожая от РИА Новости (выводится по условию) ---
-        trigger_categories = [
-            "Растениеводство",
-            "Производство мукомольной и крахмальной продукции",
-        ]
-        if okved_category in trigger_categories:
-            response_parts.append(
-                "\n\n--- **2. АКТУАЛЬНЫЕ НОВОСТИ ПО ПРОГНОЗУ УРОЖАЯ (РИА Новости)** ---"
-            )
-            ria_news = ria_news_report.get("data", [])
-            if ria_news_report.get("status") == "success" and ria_news:
-                for news_item in ria_news:
-                    response_parts.append(
-                        f"📰 **{news_item.get('title', 'Без заголовка')}**"
-                    )
-                    response_parts.append(
-                        f"   **Источник:** {news_item.get('full_article_url', 'Не указан')}"
-                    )
-            else:
-                response_parts.append("Не удалось получить новости по прогнозу урожая.")
-
-        # --- Блок 3: Прогноз цен (выводится, если был сгенерирован) ---
+        # Блок прогноза цен
         if price_forecast_summary and "не найдена" not in price_forecast_summary:
-            response_parts.append("\n\n--- **3. ОТРАСЛЕВОЙ ПРОГНОЗ ЦЕН** ---")
+            response_parts.append("\n\n--- **ОТРАСЛЕВОЙ ПРОГНОЗ ЦЕН** ---")
             response_parts.append(price_forecast_summary)
 
-        # --- Блок 4: Госпрограммы (логика остается прежней) ---
-        response_parts.append("\n\n--- **4. АНАЛИЗ ПО ГОСПРОГРАММАМ** ---\n")
+        # Блок госпрограмм (без изменений)
+        response_parts.append("\n\n--- **АНАЛИЗ ПО ГОСПРОГРАММАМ** ---\n")
+        # ... (здесь и далее код блока госпрограмм остается без изменений) ...
         if programs_report.get("passed"):
             response_parts.append("**✅ ПРЕДВАРИТЕЛЬНО ПРОХОДИТ:**")
-            # ... (здесь и далее код блока госпрограмм остается без изменений, как в вашем файле) ...
-            # Я его сокращу для краткости, но у вас он должен остаться полным
             for p in programs_report["passed"]:
                 response_parts.append(
                     f"\n➡️ **Программа:** {p.get('program_name', 'Без названия')}"
@@ -270,7 +327,6 @@ class DialogueManager:
                 "Не найдено подходящих госпрограмм или произошла ошибка при проверке."
             )
 
-        # --- Финальная фраза ---
         response_parts.append(
             "\n\n---\nЯ проанализировал всю доступную информацию. **Вы можете задать любой уточняющий вопрос** по деталям отчета."
         )
@@ -688,48 +744,128 @@ class DialogueManager:
         logger.info(f"Получено сообщение от {user_id}: '{text}'")
         state = self.get_or_create_state(user_id)
 
-        # Проверяем на ИНН в первую очередь
+        # 1. Проверка на ИНН в первую очередь
         inn_match = re.fullmatch(r"(\d{10}|\d{12})", text.strip())
         if inn_match:
             return await self._run_full_company_analysis(inn_match.group(1), state)
 
-        # Если это не ИНН, но есть контекст компании, используем NLU
+        # 2. Если это не ИНН, но контекст компании уже есть, используем NLU
         if state.get("current_inn"):
             state["history"].append({"role": "user", "content": text})
 
-            # Здесь должен быть ваш улучшенный промпт для NLU,
-            # который поможет ему различать новые намерения.
-            # Например, вы можете передать примеры в вашу функцию extract_intent_and_entities
             nlu_result = self.giga_nlu.extract_intent_and_entities(text, state)
             intent = nlu_result.get("intent")
             entities = nlu_result.get("entities")
 
-            # Новая логика маршрутизации
+            # <<< КЛЮЧЕВОЕ УЛУЧШЕНИЕ: КОНТЕКСТНАЯ ПРОВЕРКА >>>
+            # Проверяем, есть ли у нас в памяти аналитическая статья.
+            # Если да, и пользователь просит детали, то принудительно вызываем нужный обработчик.
+            # Это защищает нас от ошибок NLU.
+            has_analytics = state.get("analysis_report", {}).get("analytics_article")
+            is_details_request = any(
+                keyword in text.lower()
+                for keyword in ["подробнее", "детали", "расскажи еще", "новостям"]
+            )
+
+            if has_analytics and is_details_request:
+                logger.info(
+                    "Контекст аналитики найден. Принудительно вызываю детализацию аналитики."
+                )
+                return await self._handle_analytical_details_query(text, state)
+            # <<< КОНЕЦ УЛУЧШЕНИЯ >>>
+
+            # 3. Стандартная логика маршрутизации на основе NLU
             if intent == "analyze_msh_for_client":
                 return await self._handle_msh_analysis_query(state)
 
             elif intent == "query_msh_borrower_limit":
                 return await self._handle_msh_borrower_limit_query(entities, state)
 
-            elif (
-                intent == "query_msh_regional_balance"
-            ):  # Это новое название для старого query_msh_limits
+            elif intent == "query_msh_regional_balance":
                 return await self._handle_msh_regional_balance_query(entities, state)
+
+            elif intent == "query_analytical_details":
+                return await self._handle_analytical_details_query(text, state)
 
             elif intent == "query_news_details":
                 return await self._handle_news_details_query(text, state, entities)
 
-            # Все остальные запросы идут в общий обработчик
             else:
-                # Меняем системный промпт для общего обработчика, чтобы он соответствовал новой роли
-                # Мы делаем это "на лету" здесь, или вы можете сделать это в самой функции
-                # _handle_follow_up_query, передав роль как параметр.
-                # Это пример, как можно адаптировать стиль общения.
-                original_prompt = "Ты — дружелюбный финансовый консультант."
-                new_prompt = "Ты — ассистент-аналитик. Твоя задача — предоставлять сотруднику банка точную информацию по его запросу на основе предоставленных данных. Отвечай в деловом стиле."
-                # Здесь нужна логика для временной замены промпта...
                 return await self._handle_follow_up_query(text, state)
-
-        # Если контекста нет
         else:
             return "Для начала работы, пожалуйста, предоставьте ИНН клиента для проведения комплексного анализа."
+
+    async def _handle_analytical_details_query(
+        self, user_text: str, state: Dict[str, Any]
+    ) -> str:
+        """
+        Уровень 2: Формирует развернутый саммари (8-12 предложений) из полной статьи,
+        хранящейся в памяти (state). Вызывается по запросу "расскажи подробнее".
+        """
+        logger.info("Режим 'Детализация аналитики': генерация развернутого саммари.")
+
+        # 1. Извлекаем полную статью из "памяти" (state)
+        full_article = state.get("analysis_report", {}).get("analytics_article")
+
+        if (
+            not full_article or len(full_article) < 150
+        ):  # Проверка, что статья не пустая
+            return "К сожалению, подробная аналитическая справка для данной отрасли отсутствует или еще не загружена."
+
+        # 2. Получаем контекст для более точного промпта
+        company_name = state.get("company_name", "клиента")
+
+        # Определяем категорию, чтобы передать ее в промпт
+        from parser.forecast_generator import find_category_by_okved
+
+        okved_code = (
+            state.get("analysis_report", {})
+            .get("company_info", {})
+            .get("okved_data", {})
+            .get("main_okved", {})
+            .get("code", "")
+        )
+        category_name = (
+            find_category_by_okved(okved_code) if okved_code else "Не определена"
+        )
+
+        # 3. Формируем "умные" промпты для LLM
+        system_prompt = (
+            "Ты — ведущий отраслевой аналитик банка. Твоя задача — подготовить для сотрудника развернутую, "
+            "но сжатую аналитическую справку по отрасли его клиента. Говори профессионально, по делу и структурированно."
+        )
+
+        user_prompt = (
+            f"**Контекст:** Готовимся к встрече с компанией «{company_name}» из отрасли «{category_name}».\n\n"
+            f"**Исходный полный текст аналитического отчета:**\n"
+            f"```text\n{full_article}\n```\n\n"
+            f"**Задание:**\n"
+            "1. Внимательно прочти весь текст.\n"
+            "2. Подготовь развернутый пересказ-саммари объемом примерно 8-12 предложений.\n"
+            "3. Включи в саммари самую важную информацию, которая будет полезна сотруднику на встрече: "
+            "ключевые цифры (объемы производства, прогнозы в тоннах/процентах), главные рыночные тренды, "
+            "основные вызовы и проблемы отрасли (например, рост себестоимости, импортозамещение, господдержка), а также прогнозы на будущее.\n"
+            "4. Изложи информацию как связный, логичный текст. Не используй маркированные списки. Твой ответ должен быть сразу готов для отправки в чат."
+        )
+
+        # 4. Вызываем LLM для генерации саммари
+        try:
+            client = self.giga_nlu._get_client("formatting")
+            response = await asyncio.to_thread(
+                client.invoke,
+                [
+                    SystemMessage(content=system_prompt),
+                    HumanMessage(content=user_prompt),
+                ],
+            )
+            response_text = response.content.strip()
+
+            # 5. Сохраняем диалог в историю и возвращаем ответ
+            state["history"].append({"role": "user", "content": user_text})
+            state["history"].append({"role": "assistant", "content": response_text})
+            return response_text
+        except Exception as e:
+            logger.error(f"Ошибка при генерации детального саммари: {e}", exc_info=True)
+            return (
+                "Произошла ошибка при подготовке детального отчета. Попробуйте еще раз."
+            )
