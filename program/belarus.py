@@ -2,15 +2,13 @@
 
 import logging
 import asyncio
-from parser import egrul, full_cheko, cb # Эти импорты остаются, т.к. мы работаем с готовым досье
+from parser import egrul, full_cheko, cb 
 
-# Списки остаются без изменений
 FORBIDDEN_OKVED_CODES = [
     "64.91", "77.1", "77.31", "77.32", "77.33", "77.34", "77.35", "77.39", "77.40",
 ]
 
-# --- ИЗМЕНЕНИЕ 1: Добавляем блок с базовыми условиями ---
-# Это общая информация о программе, которая не зависит от клиента.
+
 BASE_CONDITIONS_TEXT = """
 - **Цели кредита:** Приобретение товаров, произведенных в Республике Беларусь (техника, оборудование и т.д.).
 - **Сумма кредита:** До 90% от стоимости товара. Для продукции ОАО «БЕЛАЗ» - до 70%.
@@ -18,7 +16,6 @@ BASE_CONDITIONS_TEXT = """
 - **Общий принцип ставки:** Ставка для заемщика субсидируется Правительством Республики Беларусь, что делает ее значительно ниже рыночной.
 """
 
-# <<< ЗАМЕНИТЕ ЭТУ ФУНКЦИЮ ПОЛНОСТЬЮ >>>
 async def check_belarus_program(company_dossier: dict) -> dict:
     inn = company_dossier.get("inn", "N/A")
     log_prefix = f"[Беларусь, ИНН {inn}]"
@@ -27,13 +24,11 @@ async def check_belarus_program(company_dossier: dict) -> dict:
     result = {
         "program_name": "Программа поддержки 'Беларусь'",
         "base_conditions": BASE_CONDITIONS_TEXT,
-        # Создаем словарь для хранения всех расчетных данных, который будет доступен всегда
         "analysis_data": {}
     }
 
     try:
-        # --- ШАГ 1 (НОВЫЙ): Ранний расчет ставки ---
-        # Этот блок выполняется всегда, до основных проверок
+
         check_log.append("Шаг 1: Расчет потенциальной ставки на основе ключевой ставки ЦБ.")
         key_rate_str = company_dossier.get("cbr_key_rate")
         key_rate_date = company_dossier.get("cbr_key_rate_date")
@@ -52,17 +47,15 @@ async def check_belarus_program(company_dossier: dict) -> dict:
                     f"• **Ваша итоговая эффективная ставка: ≈{final_rate:.2f}% годовых.**\n"
                     f"(Примечание: для 'Гомсельмаш' и 'МТЗ' субсидия - 3/4 от КС)."
                 )
-                result["analysis_data"]["final_rate"] = final_rate # Сохраняем числовое значение
+                result["analysis_data"]["final_rate"] = final_rate
                 check_log.append("✅ РЕЗУЛЬТАТ: Потенциальная ставка успешно рассчитана.")
             except (ValueError, TypeError):
                 check_log.append("❌ РЕЗУЛЬТАТ: Не удалось преобразовать полученную ставку ЦБ в число.")
         else:
             check_log.append("❌ РЕЗУЛЬТАТ: Данные о ключевой ставке отсутствуют в досье.")
         
-        # Сохраняем текстовое описание ставки в любом случае
         result["analysis_data"]["rate_text"] = rate_calculation_text
 
-        # --- ШАГ 2: Проверка в ЕГРЮЛ ---
         check_log.append("Шаг 2: Проверка наличия компании в ЕГРЮЛ.")
         if not company_dossier.get("is_in_egrul"):
             check_log.append("❌ РЕЗУЛЬТАТ: Компания не найдена в ЕГРЮЛ.")
@@ -71,10 +64,9 @@ async def check_belarus_program(company_dossier: dict) -> dict:
                 "reason": "Компания не найдена в Едином государственном реестре юридических лиц.",
                 "check_log": check_log,
             })
-            return result # Возвращаем result, который уже содержит analysis_data
+            return result
         check_log.append("✅ РЕЗУЛЬТАТ: Компания найдена в ЕГРЮЛ.")
 
-        # --- ШАГ 3: Проверка ОКВЭД ---
         check_log.append("Шаг 3: Анализ видов деятельности (ОКВЭД).")
         okved_data = company_dossier.get("full_cheko_data", {}).get("okved_data")
         
@@ -90,14 +82,12 @@ async def check_belarus_program(company_dossier: dict) -> dict:
         main_okved = okved_data["main_okved"]
         additional_okveds = okved_data.get("additional_okved", [])
 
-        # Проверка основного ОКВЭД
         if any(main_okved['code'].startswith(forbidden) for forbidden in FORBIDDEN_OKVED_CODES):
             reason = f"Основной вид деятельности ({main_okved['code']} - {main_okved['name']}) несовместим с программой (связан с лизингом/арендой)."
             check_log.append(f"❌ РЕЗУЛЬТАТ: {reason}")
             result.update({"passed": False, "reason": reason, "check_log": check_log})
             return result
 
-        # Проверка дополнительных ОКВЭД
         for okved in additional_okveds:
             if any(okved['code'].startswith(forbidden) for forbidden in FORBIDDEN_OKVED_CODES):
                 reason = f"Обнаружен дополнительный ОКВЭД ({okved['code']} - {okved['name']}), связанный с лизингом/арендой."
@@ -111,13 +101,11 @@ async def check_belarus_program(company_dossier: dict) -> dict:
                 return result
         check_log.append("✅ РЕЗУЛЬТАТ: В видах деятельности не найдено запрещенных кодов.")
 
-        # --- ШАГ 4: Формирование УСПЕШНОГО ответа ---
-        # Все проверки пройдены
+
         calculated_conditions_text = (
             f"- Цели кредита: Приобретение товаров, произведенных в Республике Беларусь.\n"
             f"- Сумма кредита: До 90% от стоимости товара (до 70% для ОАО «БЕЛАЗ»).\n"
             f"- Валюта и срок: Рубли РФ, до 5 лет.\n"
-            # Используем уже рассчитанный текст ставки из analysis_data
             f"- Льготная процентная ставка:\n{result['analysis_data']['rate_text']}"
         )
         manual_steps_text = (
