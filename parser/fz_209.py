@@ -9,24 +9,19 @@ from langchain_core.messages import SystemMessage, HumanMessage
 import re
 import json
 
-# Динамическое добавление пути к src
-# Убедитесь, что путь до папки src указан корректно
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
-# Предполагается, что ваш класс GigaChatNLU находится в src/nlu/
-# Если это не так, скорректируйте путь
+
 from src.nlu.gigachat_client import GigaChatNLU
 
-# Настройка логирования
 logging.basicConfig(
     level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s"
 )
 logger = logging.getLogger(__name__)
 
-# URL-адреса для парсинга
 URLS = [
-    "https://www.consultant.ru/document/cons_doc_LAW_52144/08b3ecbcdc9a360ad1dc314150a6328886703356/",  # URL с данными о численности
-    "https://www.consultant.ru/document/cons_doc_LAW_196415/#dst100005",  # URL с данными о доходах
+    "https://www.consultant.ru/document/cons_doc_LAW_52144/08b3ecbcdc9a360ad1dc314150a6328886703356/",  
+    "https://www.consultant.ru/document/cons_doc_LAW_196415/#dst100005", 
 ]
 
 
@@ -43,7 +38,7 @@ async def _get_interactive_text_from_url(url: str) -> str:
             await page.goto(url, wait_until="domcontentloaded", timeout=30000)
             await page.wait_for_timeout(
                 2000
-            )  # Даем время на прогрузку динамического контента
+            ) 
             html_content = await page.content()
             await context.close()
 
@@ -66,7 +61,6 @@ async def extract_comparison_data(
 ) -> Dict[str, Dict[str, str]]:
     """Извлекает текст с нескольких URL, объединяет его и анализирует с помощью GigaChat."""
     full_text = ""
-    # Асинхронно получаем текст с каждого URL
     tasks = [_get_interactive_text_from_url(url) for url in urls]
     texts = await asyncio.gather(*tasks)
 
@@ -91,7 +85,6 @@ async def extract_comparison_data(
         "Если какие-то данные отсутствуют, оставь соответствующий словарь пустым."
     )
 
-    # ИСПРАВЛЕНИЕ: Убираем обрезку текста. Теперь вся информация передается модели.
     user_prompt = f"Извлеки данные из следующего текста:\n{full_text}"
 
     try:
@@ -107,7 +100,6 @@ async def extract_comparison_data(
         json_match = re.search(r"\{[\s\S]*\}", response_content)
         if json_match:
             json_string = json_match.group(0)
-            # Заменяем одинарные кавычки на двойные для совместимости с JSON
             data = json.loads(json_string.replace("'", '"'))
             logger.info(f"GigaChat успешно извлек данные: {data}")
             return data
@@ -125,7 +117,6 @@ async def extract_comparison_data(
 
 async def main():
     gigachat = GigaChatNLU()
-    # Передаем список URL в функцию
     comparison_data = await extract_comparison_data(gigachat, URLS)
 
     if comparison_data:
