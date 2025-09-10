@@ -1,4 +1,3 @@
-# parser/nt.py (Новая версия без Selenium, с логированием времени)
 import os
 import re
 import sys
@@ -10,11 +9,9 @@ import logging
 from bs4 import BeautifulSoup
 from urllib.parse import urljoin
 
-# Настраиваем логирование, которое будет использоваться другими модулями
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 
-# Подавляем предупреждения
 try:
     from urllib3.exceptions import InsecureRequestWarning
     requests.packages.urllib3.disable_warnings(InsecureRequestWarning)
@@ -33,7 +30,6 @@ def get_sez_inns() -> set | None:
     headers = {"User-Agent": USER_AGENT}
     
     try:
-        # --- Этап 1: Получение ссылки на PDF ---
         logger.info(f"{log_prefix} Этап 1: Загрузка HTML страницы для поиска ссылки...")
         start_time = time.time()
         session = requests.Session()
@@ -51,7 +47,6 @@ def get_sez_inns() -> set | None:
         pdf_url = urljoin(BASE_URL, pdf_link_element.get("href"))
         logger.info(f"{log_prefix} Найдена ссылка на PDF: {pdf_url}")
         
-        # --- Этап 2: Скачивание файла ---
         logger.info(f"{log_prefix} Этап 2: Скачивание PDF-файла...")
         start_time = time.time()
         download_headers = headers.copy()
@@ -61,7 +56,6 @@ def get_sez_inns() -> set | None:
         pdf_file_in_memory = io.BytesIO(response_pdf.content)
         logger.info(f"{log_prefix} PDF-файл ({len(response_pdf.content) // 1024} КБ) скачан за {time.time() - start_time:.2f} сек.")
 
-        # --- Этап 3: Извлечение ИНН ---
         logger.info(f"{log_prefix} Этап 3: Извлечение ИНН из PDF...")
         start_time = time.time()
         all_inns = set()
@@ -89,7 +83,6 @@ def get_sez_inns() -> set | None:
         logger.error(f"{log_prefix} Произошла непредвиденная ошибка: {e}", exc_info=True)
         return None
 
-# Блок для прямого запуска и теста
 if __name__ == "__main__":
     inns = get_sez_inns()
     if inns:
