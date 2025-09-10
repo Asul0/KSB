@@ -1,4 +1,3 @@
-# src/web_searcher.py (версия 3, с правильной обработкой ошибок и новыми селекторами)
 import logging
 import os
 import random
@@ -18,7 +17,6 @@ os.makedirs(DEBUG_SCREENSHOT_DIR, exist_ok=True)
 async def search_links(query: str, max_results: int = 5) -> list[dict]:
     logger.info(f"Запущен АСИНХРОННЫЙ веб-поиск по запросу: '{query}'")
     
-    # --- ИЗМЕНЕНИЕ 1: Выносим инициализацию за пределы try-блока ---
     async with async_playwright() as p:
         context = await p.chromium.launch_persistent_context(
             USER_DATA_DIR,
@@ -41,9 +39,6 @@ async def search_links(query: str, max_results: int = 5) -> list[dict]:
             search_url = f"https://yandex.ru/search/?text={query.replace(' ', '+')}"
             await page.goto(search_url, wait_until="domcontentloaded", timeout=40000)
 
-            # --- ИЗМЕНЕНИЕ 2: НОВЫЕ, БОЛЕЕ НАДЕЖНЫЕ СЕЛЕКТОРЫ ---
-            # Яндекс сейчас часто использует ID 'search-result' для всего блока
-            # или ul/ol с классом 'serp-list' для списка. Пробуем их.
             search_results_selector = "#search-result, ul.serp-list, ol.serp-list"
             captcha_selector = '.CheckboxCaptcha-Checkbox'
             
@@ -51,14 +46,12 @@ async def search_links(query: str, max_results: int = 5) -> list[dict]:
             
             await page.wait_for_selector(
                 f"{search_results_selector}, {captcha_selector}",
-                state="attached", # 'attached' сработает, даже если элемент еще не виден, но уже есть в DOM
+                state="attached",
                 timeout=15000
             )
 
-            # Проверка на капчу
             if await page.is_visible(captcha_selector):
                 logger.error("!!! ОБНАРУЖЕНА КАПЧА ЯНДЕКСА !!!")
-                # ... (код для скриншота капчи без изменений)
                 return []
 
             logger.info("Блок с результатами поиска найден. Получаю HTML.")
@@ -75,22 +68,18 @@ async def search_links(query: str, max_results: int = 5) -> list[dict]:
             except Exception as se:
                 logger.error(f"Не удалось сделать скриншот при ошибке: {se}")
             
-            # Возвращаем пустой список, но не падаем
             html_content = None
 
         finally:
-            # Закрываем контекст здесь, после всех действий
             await context.close()
 
     if not html_content:
         logger.warning(f"Не удалось получить HTML-контент для запроса '{query}'.")
         return []
 
-    # --- ИЗМЕНЕНИЕ 3: ОБНОВЛЕННЫЕ СЕЛЕКТОРЫ ДЛЯ ПАРСИНГА BS4 ---
     soup = BeautifulSoup(html_content, "lxml")
     results = []
     
-    # Ищем карточки по классу, который используется сейчас
     result_cards = soup.select('li.serp-item') 
     
     if not result_cards:
@@ -100,11 +89,9 @@ async def search_links(query: str, max_results: int = 5) -> list[dict]:
         if len(results) >= max_results:
             break
 
-        # Пропускаем рекламу
         if card.select_one('[data-type="ad"]') or "yabs.yandex.ru" in str(card):
             continue
 
-        # Селекторы для заголовка и ссылки тоже обновляем
         title_tag = card.select_one('h2 a, .organic__title-wrapper a')
         link_tag = card.select_one('h2 a, .organic__title-wrapper a')
         
