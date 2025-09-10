@@ -11,7 +11,6 @@ from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 import pdfplumber
 
-# Подавляем только предупреждения о небезопасном SSL-соединении
 try:
     from urllib3.exceptions import InsecureRequestWarning
 
@@ -32,10 +31,8 @@ def get_subsidy_limits() -> dict | None:
     chrome_options = Options()
     chrome_options.add_argument("--headless")
     chrome_options.add_argument("--no-sandbox")
-    # ... (остальные опции без изменений) ...
     driver = webdriver.Chrome(options=chrome_options)
     try:
-        # Этап 1: Получение ссылки (без изменений)
         driver.get(BASE_URL)
         link_xpath = "//a[contains(text(), 'Остаток субсидий по состоянию на')]"
         pdf_link_element = WebDriverWait(driver, 20).until(EC.presence_of_element_located((By.XPATH, link_xpath)))
@@ -48,7 +45,6 @@ def get_subsidy_limits() -> dict | None:
 
     if not pdf_url: return None
 
-    # Этап 2: Скачивание PDF (без изменений)
     try:
         headers = {"User-Agent": USER_AGENT, "Referer": BASE_URL}
         response = requests.get(pdf_url, timeout=60, headers=headers, verify=False)
@@ -58,7 +54,6 @@ def get_subsidy_limits() -> dict | None:
         print(f"Критическая ошибка скачивания: {e}", file=sys.stderr)
         return None
 
-    # Этап 3: Извлечение данных (без изменений в логике, только в выводе)
     try:
         limits_data = {}
         with pdfplumber.open(pdf_file_in_memory) as pdf:
@@ -88,20 +83,17 @@ def get_subsidy_limits() -> dict | None:
                                 limits_data[region_name][activity_name] = limit_value
                             except (ValueError, TypeError): pass
         
-        # <<< ГЛАВНОЕ ИЗМЕНЕНИЕ: ВОЗВРАЩАЕМ СЛОВАРЬ >>>
         return limits_data
 
     except Exception as e:
         print(f"Критическая ошибка при обработке PDF: {e}", file=sys.stderr)
         return None
 
-# <<< БЛОК ДЛЯ ТЕСТИРОВАНИЯ ТЕПЕРЬ ИСПОЛЬЗУЕТ JSON >>>
 if __name__ == "__main__":
     print("Запускаю парсер лимитов МСХ...")
     all_limits_data = get_subsidy_limits()
     if all_limits_data:
         print("\n--- ИТОГОВЫЕ ДАННЫЕ ПО ЛИМИТАМ (в формате JSON) ---")
-        # Выводим в формате JSON, который идеально подходит для передачи в LLM
         print(json.dumps(all_limits_data, ensure_ascii=False, indent=2))
     else:
         print("Не удалось получить данные о лимитах.")
