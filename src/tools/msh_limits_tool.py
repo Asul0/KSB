@@ -1,8 +1,6 @@
-# src/tools/msh_limits_tool.py
 import asyncio
 from parser.msx_limit import get_subsidy_limits
 
-# Здесь можно реализовать кэширование, чтобы не парсить PDF каждый раз
 _cached_limits = None
 
 async def get_msh_limits_data() -> dict | None:
