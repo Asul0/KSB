@@ -1,4 +1,3 @@
-# Файл: programs/belarus.py (ИСПРАВЛЕННАЯ ВЕРСИЯ С BASE_CONDITIONS)
 
 import logging
 import asyncio
