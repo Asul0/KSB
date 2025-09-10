@@ -1,7 +1,6 @@
 import json
 import os
 
-# --- ШАГ 1: ЗАГРУЗКА ДАННЫХ ИЗ ФАЙЛОВ ---
 
 
 def load_data_from_json(file_path: str) -> list | dict:
@@ -19,11 +18,9 @@ def load_data_from_json(file_path: str) -> list | dict:
         return None
 
 
-# --- ИЗМЕНЕНИЕ: Указываем правильные пути к файлам относительно скрипта ---
-# Скрипт находится в 'parser', данные - в 'data'. Путь '../data/' означает "подняться на уровень выше и зайти в папку data".
 base_dir = os.path.dirname(
     os.path.abspath(__file__)
-)  # Папка, где лежит скрипт (parser)
+)  
 okved_file_path = os.path.join(base_dir, "..", "data", "msh_okveds.json")
 forecast_file_path = os.path.join(base_dir, "..", "data", "price_forecasts.json")
 
@@ -31,7 +28,6 @@ OKVED_CATEGORIES = load_data_from_json(okved_file_path)
 PRICE_FORECAST_DATA = load_data_from_json(forecast_file_path)
 
 
-# --- ШАГ 2: ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ (остаются без изменений) ---
 
 
 def find_category_by_okved(okved_code: str) -> str | None:
@@ -64,7 +60,6 @@ def calculate_percentage_change(current_price: float, previous_price: float) -> 
     return f"({sign}{change:.1f}% к АППГ)"
 
 
-# --- ШАГ 3: ГЛАВНАЯ ФУНКЦИЯ ГЕНЕРАЦИИ САММАРИ (остается без изменений) ---
 
 
 def generate_price_forecast(okved_code: str) -> str:
@@ -121,7 +116,6 @@ def generate_price_forecast(okved_code: str) -> str:
     return final_summary
 
 
-# --- ШАГ 4: ИНТЕРАКТИВНЫЙ РЕЖИМ ДЛЯ ТЕСТИРОВАНИЯ ---
 
 if __name__ == "__main__":
     print("--- Тестовый генератор прогнозов по ОКВЭД ---")
