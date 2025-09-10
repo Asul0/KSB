@@ -1,4 +1,3 @@
-# src/web_news_analyzer.py
 import logging
 import asyncio
 from typing import Dict, Any, List, Tuple
@@ -8,7 +7,6 @@ import re
 import json
 from langchain_core.messages import SystemMessage, HumanMessage
 
-# Эти импорты остаются, так как они нужны для поиска и анализа новостей
 from src.web_searcher import search_links
 from src.nlu.gigachat_client import GigaChatNLU
 
@@ -16,7 +14,6 @@ logger = logging.getLogger(__name__)
 
 GIGACHAT_BLACKLIST_MARKER = "временно ограничены"
 MAX_ANALYSIS_ATTEMPTS = 3
-# Этот список доменов нужен для фильтрации нерелевантных новостных источников
 BAD_NEWS_DOMAINS = [
     "che-cko.ru",
     "companies.rbc.ru",
@@ -25,7 +22,7 @@ BAD_NEWS_DOMAINS = [
     "audit-it.ru",
     "rusprofile.ru",
     "sbis.ru",
-    "basis.myseldon.com" # Убираем агрегаторы, чтобы получать первоисточники
+    "basis.myseldon.com"
 ]
 
 
@@ -47,7 +44,7 @@ async def _get_interactive_text_from_url(url: str) -> str:
             )
             context = await browser.new_context(
                 user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/118.0.0.0 Safari/537.36",
-                ignore_https_errors=True  # <-- ВОТ ЭТА СТРОКА
+                ignore_https_errors=True
             )
             page = await context.new_page()
             await page.goto(url, wait_until="domcontentloaded", timeout=25000)
@@ -76,21 +73,18 @@ async def _search_and_scrape_news(okved_description: str, attempt_number: int) -
 
     search_queries = []
     if attempt_number == 1:
-        # Основные, глубокие запросы
         search_queries = [
             f'анализ рынка "{okved_description}" Россия: ключевые показатели, проблемы и перспективы начиная с 2025 года',
             f'ключевые тренды и прогноз развития отрасли "{okved_description}" до 2030',
             f'цифровизация, импортозамещение и инновации в отрасли "{okved_description}" кейсы и решения'
         ]
     elif attempt_number == 2:
-        # Альтернативные, более общие запросы
         search_queries = [
             f'обзор отрасли "{okved_description}" в РФ новости 2025',
             f'статистика и показатели "{okved_description}" Россия 2025-2026',
             f'государственная поддержка отрасли "{okved_description} 2025-2026"'
         ]
-    else: # attempt_number >= 3
-        # Запросы "последней надежды", максимально нейтральные
+    else:
         search_queries = [
             f'перспективы развития "{okved_description}" в текущих условиях 2025',
             f'драйверы роста "{okved_description}" 2025',
@@ -123,7 +117,6 @@ async def _search_and_scrape_news(okved_description: str, attempt_number: int) -
     logger.info(f"Успешно собрано {len(scraped_texts)} аналитических статей из {len(source_info)} источников.")
     return "\n\n".join(scraped_texts), source_info
 
-# <<< НОВАЯ ГЛАВНАЯ ФУНКЦИЯ, КОТОРУЮ ИЩЕТ DIALOGUE_MANAGER >>>
 async def get_news_analysis_for_company(
     company_name: str, 
     inn: str, 
@@ -150,7 +143,7 @@ async def get_news_analysis_for_company(
         if not news_context_text:
             logger.warning(f"На попытке {attempt} не найдено статей для анализа. Пробуем другие запросы.")
             last_error = "Не удалось найти релевантные статьи в открытых источниках."
-            await asyncio.sleep(1) # Небольшая пауза перед следующей попыткой
+            await asyncio.sleep(1)
             continue
 
         user_prompt = (
@@ -181,18 +174,16 @@ async def get_news_analysis_for_company(
             response_content = response.content.strip()
             logger.info(f"GigaChat (попытка {attempt}) вернул: {response_content[:300]}...")
 
-            # ЯВНАЯ ПРОВЕРКА НА BLACKLIST
             if GIGACHAT_BLACKLIST_MARKER in response_content:
                 logger.warning(f"GigaChat вернул ответ из 'blacklist' на попытке {attempt}. Пробуем снова с другими источниками.")
                 last_error = "Анализ был заблокирован контент-фильтром нейросети."
-                continue # Переходим к следующей итерации цикла
+                continue
 
             json_match = re.search(r"\{[\s\S]*\}", response_content)
             if json_match:
                 analysis_result = json.loads(json_match.group(0))
                 final_news = analysis_result.get("top_news", [])
                 
-                # Проверка, что результат не пустой и осмысленный
                 if not final_news:
                     logger.warning(f"GigaChat вернул пустой список новостей на попытке {attempt}. Пробуем снова.")
                     last_error = "Нейросеть не смогла извлечь значимые факты из найденных статей."
@@ -204,7 +195,7 @@ async def get_news_analysis_for_company(
                 analysis_result["top_news"] = final_news
                 analysis_result["source_urls"] = source_urls
                 logger.info("Анализ новостей от GigaChat успешно получен и обработан.")
-                return analysis_result # <<< УСПЕХ! ВЫХОДИМ ИЗ ЦИКЛА И ФУНКЦИИ
+                return analysis_result
             else:
                 last_error = "GigaChat не вернул ответ в формате JSON."
                 logger.warning(f"{last_error} на попытке {attempt}. Пробуем снова.")
@@ -213,10 +204,8 @@ async def get_news_analysis_for_company(
         except Exception as e:
             logger.error(f"Критическая ошибка при анализе новостей на попытке {attempt}: {e}", exc_info=True)
             last_error = f"Внутренняя ошибка при обращении к сервису аналитики: {e}"
-            # При критической ошибке можно прервать цикл раньше
             break
     
-    # <<< ЭТОТ БЛОК ВЫПОЛНИТСЯ, ЕСЛИ ВСЕ ПОПЫТКИ В ЦИКЛЕ ПРОВАЛИЛИСЬ >>>
     logger.error(f"Не удалось получить анализ новостей после {MAX_ANALYSIS_ATTEMPTS} попыток. Последняя ошибка: {last_error}")
     return {
         "top_news": [],
