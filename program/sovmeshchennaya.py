@@ -1,10 +1,7 @@
-# Файл: programs/sovmeshchennaya.py (ИСПРАВЛЕННАЯ ВЕРСИЯ С ПРОВЕРКОЙ ПО ПРЕФИКСУ)
-
 import logging
 import asyncio
 from parser import full_cheko, msp_check, cb
 
-# Списки правил остаются без изменений
 ALLOWED_OKVED_RULES = [
     {"code": "10"},
     {"code": "11", "exceptions": []},
@@ -75,9 +72,7 @@ FORBIDDEN_OKVED_RULES = [
     {"code": "92", "exceptions": []},
 ]
 
-# ==============================================================================
-# <<< ПОЛНОСТЬЮ ПЕРЕПИСАННАЯ ФУНКЦИЯ ПРОВЕРКИ ОКВЭД >>>
-# ==============================================================================
+
 def _check_okved_rules(all_okveds: list[tuple[str, str]], main_okved_code: str, main_okved_name: str) -> dict:
     """
     Проверяет ОКВЭД по иерархическому принципу (по префиксам).
@@ -91,28 +86,24 @@ def _check_okved_rules(all_okveds: list[tuple[str, str]], main_okved_code: str, 
             rule_code = rule["code"]
             exceptions = rule.get("exceptions", [])
             
-            # Проверяем, не является ли код исключением
             is_exception = False
             for exc in exceptions:
                 if code_to_check.startswith(exc):
                     is_exception = True
                     break
             if is_exception:
-                continue # Переходим к следующему правилу, т.к. этот код - исключение
+                continue 
 
-            # Если код начинается с разрешенного/запрещенного префикса и не является исключением
             if code_to_check.startswith(rule_code):
                 return True
         return False
 
-    # 1. Проверяем, что основной ОКВЭД соответствует РАЗРЕШЕННЫМ правилам
     if not is_code_allowed(main_okved_code, ALLOWED_OKVED_RULES):
         return {
             "passed": False,
             "reason": f"Основной ОКВЭД ({main_okved_code} - {main_okved_name}) не входит в приоритетные отрасли.",
         }
 
-    # 2. Проверяем все ОКВЭДы компании на соответствие ЗАПРЕЩЕННЫМ правилам
     for code, name in all_okveds:
         if is_code_allowed(code, FORBIDDEN_OKVED_RULES):
             return {
@@ -120,11 +111,9 @@ def _check_okved_rules(all_okveds: list[tuple[str, str]], main_okved_code: str, 
                 "reason": f"Обнаружен запрещенный ОКВЭД ({code} - {name}).",
             }
 
-    # 3. Если все проверки пройдены
     return {"passed": True}
 
 
-# BASE_CONDITIONS_TEXT остается без изменений
 BASE_CONDITIONS_TEXT = """
 - **Цели кредита:** Инвестиционные цели, такие как приобретение или создание основных средств, запуск новых производств. До 20% от суммы кредита можно направить на пополнение оборотных средств.
 - **Срок:** До 10 лет, при этом период субсидирования процентной ставки составляет 5 лет.
@@ -133,8 +122,7 @@ BASE_CONDITIONS_TEXT = """
 - **Основные требования:** Компания должна быть в реестре МСП, основной ОКВЭД должен относиться к приоритетным отраслям (обрабатывающие производства, IT, туризм и др.), и отсутствовать запрещенные виды деятельности.
 """
 
-# Основная функция check_sovmeshchennaya_program остается без изменений,
-# так как вся логика инкапсулирована в _check_okved_rules
+
 
 async def check_sovmeshchennaya_program(company_dossier: dict) -> dict:
     inn = company_dossier.get("inn", "N/A")
@@ -151,7 +139,6 @@ async def check_sovmeshchennaya_program(company_dossier: dict) -> dict:
         msp_category = company_dossier.get("msp_category")
         clean_msp_category = msp_category.replace("\n", " ").strip().lower() if msp_category else None
 
-        # --- ШАГ 1 (НОВЫЙ): Ранний расчет лимита и ставки ---
         check_log.append("Шаг 1: Расчет потенциального кредитного лимита и льготной ставки.")
         limit_map = {"микропредприятие": "200 млн рублей", "малое предприятие": "500 млн рублей", "среднее предприятие": "2 млрд рублей"}
         credit_limit_text = limit_map.get(clean_msp_category, "не определен") if clean_msp_category else "не определен"
@@ -172,7 +159,6 @@ async def check_sovmeshchennaya_program(company_dossier: dict) -> dict:
         result["analysis_data"]["rate_text"] = rate_text
         check_log.append(f"   - Потенциальная ставка: {rate_text}")
 
-        # --- ШАГ 2: Проверка в реестре МСП ---
         check_log.append("Шаг 2: Проверка в Едином реестре субъектов МСП.")
         if not msp_category:
             check_log.append("❌ РЕЗУЛЬТАТ: Компания не найдена в реестре МСП.")
@@ -180,7 +166,6 @@ async def check_sovmeshchennaya_program(company_dossier: dict) -> dict:
             return result
         check_log.append(f"✅ РЕЗУЛЬТАТ: Компания найдена, категория - '{clean_msp_category}'.")
 
-        # --- ШАГ 3: Проверка ОКВЭД ---
         check_log.append("Шаг 3: Проверка ОКВЭД на соответствие правилам программы.")
         okved_data = company_dossier.get("full_cheko_data", {}).get("okved_data")
         if not okved_data or not okved_data.get("main_okved"):
@@ -195,7 +180,6 @@ async def check_sovmeshchennaya_program(company_dossier: dict) -> dict:
             return result
         check_log.append("✅ РЕЗУЛЬТАТ: ОКВЭДы соответствуют требованиям программы.")
         
-        # --- ШАГ 4: Формирование УСПЕШНОГО ответа ---
         calculated_conditions = (
             f"- Цель кредита: Инвестиционные цели (до 20% на оборотные средства).\n"
             f"- Сумма кредита: От 50 млн до **{result['analysis_data']['credit_limit_text']}** (категория '{clean_msp_category}').\n"
