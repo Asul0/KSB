@@ -18,7 +18,6 @@ from src.nlu.gigachat_client import GigaChatNLU
 from src.web_news_analyzer import get_news_analysis_for_company
 from src.tools.state_program_analyzer import run_state_programs_check
 
-# Импортируем парсер из full_cheko.py (как вы и просили, без переименования)
 from parser.full_cheko import get_company_data_by_inn_async
 
 from src.config import settings
@@ -41,7 +40,6 @@ class DialogueManager:
     def __init__(self):
         self.giga_nlu = GigaChatNLU()
         self.user_states: Dict[str, Dict[str, Any]] = {}
-        # ... RAG и другая инициализация ...
 
     async def _handle_news_details_query(
         self, user_text: str, state: Dict[str, Any], entities: Dict[str, Any]
@@ -53,8 +51,7 @@ class DialogueManager:
         query_text = entities.get("news_identifier", "").lower()
 
         target_news_list = []
-        # <<< ИЗМЕНЕНИЕ: Улучшенная логика поиска >>>
-        # Если в запросе есть "риа" или "агро", ищем только там. Иначе - везде.
+
         if "агро" in source_identifier or (
             "агро" in query_text and not source_identifier
         ):
@@ -63,15 +60,13 @@ class DialogueManager:
             "риа" in query_text and not source_identifier
         ):
             target_news_list = full_report.get("ria_news_forecast", [])
-        else:  # Если источник не указан и не упоминается в тексте, ищем по всему
+        else:  
             target_news_list = full_report.get(
                 "agroinvestor_news", []
             ) + full_report.get("ria_news_forecast", [])
 
         found_news = None
-        # Ищем по ключевым словам из запроса в заголовке
         for news in target_news_list:
-            # Проверяем, что все слова из запроса есть в заголовке
             if all(
                 word in news.get("title", "").lower() for word in query_text.split()
             ):
@@ -79,7 +74,6 @@ class DialogueManager:
                 break
 
         if not found_news:
-            # Если не нашли по словам, попробуем найти по примерному совпадению
             for news in target_news_list:
                 if query_text in news.get("title", "").lower():
                     found_news = news
@@ -92,7 +86,6 @@ class DialogueManager:
         ):
             return "К сожалению, не удалось найти подробный текст для этой новости или это была ссылка на раздел сайта."
 
-        # <<< ИЗМЕНЕНИЕ: Новый, более детальный промпт для LLM >>>
         system_prompt = (
             "Ты — ассистент-аналитик. Твоя задача — внимательно прочитать текст новостной статьи "
             "и подготовить подробную, структурированную сводку на русском языке. Ответ должен быть информативным."
@@ -117,7 +110,6 @@ class DialogueManager:
                 ],
             )
             response_text = response.content.strip()
-            # Добавляем ответ в историю
             state["history"].append({"role": "user", "content": user_text})
             state["history"].append({"role": "assistant", "content": response_text})
             return response_text
@@ -137,12 +129,10 @@ class DialogueManager:
             }
         return self.user_states[user_id]
 
-        # <<< ЗАМЕНИТЕ ЭТУ ФУНКЦИЮ ПОЛНОСТЬЮ >>>
 
     async def _run_full_company_analysis(self, inn: str, state: Dict[str, Any]) -> str:
         logger.info(f"Запускаю НОВЫЙ КОМПЛЕКСНЫЙ анализ для ИНН {inn}.")
 
-        # --- ШАГ 0: Получение базовой информации о компании ---
         company_data = await get_company_data_by_inn_async(inn)
         if company_data.get("error"):
             return f"Не удалось получить данные для компании с ИНН {inn}. Причина: {company_data['error']}"
@@ -159,20 +149,15 @@ class DialogueManager:
         okved_category = find_category_by_okved(okved_code)
         logger.info(f"Для ИНН {inn} определена категория: '{okved_category}'")
 
-        # --- ШАГ 1-3: КОНТЕКСТНО-ЗАВИСИМЫЙ СБОР ДАННЫХ ---
 
-        # <<< КЛЮЧЕВОЕ ИЗМЕНЕНИЕ: Логика ветвления ДО запуска парсеров >>>
 
-        # Задачи, которые выполняются всегда
         task_programs = asyncio.create_task(run_state_programs_check(inn))
 
-        # Инициализируем переменные для новостей
         agroinvestor_report = {"status": "skipped", "data": []}
         ria_news_report = {"status": "skipped", "data": []}
         price_forecast_summary = ""
         news_block_content = []
 
-        # Список категорий-исключений, для которых работает старая логика
         parser_exceptions = [
             "Растениеводство",
             "Производство мукомольной и крахмальной продукции",
@@ -185,12 +170,10 @@ class DialogueManager:
             task_agroinvestor = asyncio.create_task(get_latest_agro_news())
             task_ria_news = asyncio.create_task(get_ria_news_async())
 
-            # Ожидаем завершения парсеров вместе с госпрограммами
             agroinvestor_report, ria_news_report, programs_report = (
                 await asyncio.gather(task_agroinvestor, task_ria_news, task_programs)
             )
-            # --- Формируем старый блок новостей ---
-            # Блок 1: Агроинвестор
+
             news_block_content.append(
                 "--- **1. САМОЕ ИНТЕРЕСНОЕ В АПК ЗА ПОСЛЕДНЕЕ ВРЕМЯ (Агроинвестор)** ---"
             )
@@ -205,7 +188,6 @@ class DialogueManager:
                     "Не удалось получить свежие новости от 'Агроинвестора'."
                 )
 
-            # Блок 2: РИА Новости
             news_block_content.append(
                 "\n\n--- **2. АКТУАЛЬНЫЕ НОВОСТИ ПО ПРОГНОЗУ УРОЖАЯ (РИА Новости)** ---"
             )
@@ -227,14 +209,11 @@ class DialogueManager:
             logger.info(
                 f"Стандартная категория '{okved_category}'. Загружаю аналитику из файла."
             )
-            # Ожидаем завершения только одной обязательной задачи
             programs_report = await task_programs
 
-            # --- Формируем НОВЫЙ блок с аналитикой ---
             category_data = ANALYTICS_DATA.get(okved_category)
             if category_data and category_data.get("article"):
                 full_article = category_data["article"]
-                # Простое создание выжимки: берем первые 3-4 предложения
                 sentences = full_article.split(".")
                 summary_text = ". ".join(sentences[:4]).strip() + "."
 
@@ -252,19 +231,16 @@ class DialogueManager:
                     "Аналитическая справка для данной категории находится в процессе подготовки."
                 )
 
-        # Генерация прогноза цен (если нужна)
         price_forecast_summary = generate_price_forecast(okved_code)
 
-        # --- ШАГ 4: Сохранение полного отчета в "память" ассистента ---
         full_report = {
             "company_info": company_data,
             "agroinvestor_news": agroinvestor_report.get(
                 "data", []
-            ),  # Сохраняем, даже если пустые
+            ), 
             "ria_news_forecast": ria_news_report.get("data", []),
             "price_forecast_summary": price_forecast_summary,
             "programs_analysis": programs_report,
-            # <<< НОВОЕ ПОЛЕ: Сохраняем аналитику для будущих запросов >>>
             "analytics_article": ANALYTICS_DATA.get(okved_category, {}).get(
                 "article", ""
             ),
@@ -274,22 +250,17 @@ class DialogueManager:
         state["analysis_report"] = full_report
         state["history"] = []
 
-        # --- ШАГ 5: Формирование финального отчета для пользователя ---
         response_parts = [
             f"✅ **Комплексный анализ для «{company_name}» (ИНН: {inn})**\n"
         ]
 
-        # Добавляем наш динамически созданный новостной блок
         response_parts.extend(news_block_content)
 
-        # Блок прогноза цен
         if price_forecast_summary and "не найдена" not in price_forecast_summary:
             response_parts.append("\n\n--- **ОТРАСЛЕВОЙ ПРОГНОЗ ЦЕН** ---")
             response_parts.append(price_forecast_summary)
 
-        # Блок госпрограмм (без изменений)
         response_parts.append("\n\n--- **АНАЛИЗ ПО ГОСПРОГРАММАМ** ---\n")
-        # ... (здесь и далее код блока госпрограмм остается без изменений) ...
         if programs_report.get("passed"):
             response_parts.append("**✅ ПРЕДВАРИТЕЛЬНО ПРОХОДИТ:**")
             for p in programs_report["passed"]:
@@ -344,13 +315,10 @@ class DialogueManager:
         """
         logger.info("Режим 'Справочник': запрос максимального лимита кредита.")
 
-        # <<< ИЗМЕНЕНИЕ 1: Добавляем entities = entities or {} для защиты от None >>>
         entities = entities or {}
 
-        # Определяем, по какой категории деятельности задан вопрос
         activity_name = entities.get("activity_name")
         if not activity_name:
-            # Если в вопросе нет названия, берем основную категорию клиента из памяти
             program_analysis = state.get("analysis_report", {}).get(
                 "programs_analysis", {}
             )
@@ -368,16 +336,13 @@ class DialogueManager:
         if not company_region:
             return "Регион клиента не определен. Сначала необходимо провести анализ по ИНН."
 
-        # Ищем лимит в загруженных данных
         region_limits = CREDIT_LIMITS_DATA.get(company_region)
         if not region_limits:
             return f"В базе данных отсутствуют сведения о максимальных лимитах для региона «{company_region}»."
 
-        # <<< ИЗМЕНЕНИЕ 2: Гибкий поиск ключа >>>
         found_limit = None
         found_activity_name = None
         for key, value in region_limits.items():
-            # Ищем частичное совпадение без учета регистра
             if activity_name.lower() in key.lower():
                 found_limit = value
                 found_activity_name = key  # Сохраняем "красивое" название из ключа
@@ -399,8 +364,7 @@ class DialogueManager:
         Режим "Справочник": отвечает на вопрос об актуальном остатке субсидий в регионе.
         Источник данных: парсер PDF.
         """
-        # Эта функция полностью заменяет старую _handle_msh_limits_query
-        # Логика остается той же, но меняется стиль ответа.
+
         logger.info("Режим 'Справочник': запрос актуального остатка субсидий.")
 
         target_region = state.get("company_region")
@@ -561,7 +525,6 @@ class DialogueManager:
         if not all_limits:
             return "К сожалению, мне не удалось получить актуальные данные о лимитах с сайта Минсельхоза. Возможно, сервис временно недоступен."
 
-        # 4. <<< УЛУЧШЕННАЯ ЛОГИКА ПОИСКА РЕГИОНА >>>
         region_data = None
         found_region_name = None
 
@@ -571,9 +534,8 @@ class DialogueManager:
         for key, value in all_limits.items():
             key_clean = (
                 key.lower().replace(" ", "").split("(")[0]
-            )  # Убираем скобки типа "(Адыгея)"
+            ) 
 
-            # Сравниваем "очищенные" версии. Это гораздо надежнее.
             if key_clean == target_region_clean:
                 region_data = value
                 found_region_name = key  # Сохраняем оригинальное, красивое название
@@ -650,8 +612,7 @@ class DialogueManager:
         company_region = state.get("company_region")
 
         if actual_limits_data and company_region:
-            # ... (здесь можно вставить логику для сравнения субсидии и остатка,
-            # как мы обсуждали, но для начала сделаем проще)
+
             response_parts.append(
                 "\n**Напоминание об актуальных остатках:**\n"
                 "Не забудьте, что реальная выдача кредита ограничена свободными лимитами субсидий в вашем регионе. "
@@ -667,14 +628,11 @@ class DialogueManager:
     ) -> str:
         logger.info(f"Обработка вопроса в контексте компании «{state['company_name']}»")
 
-        import copy  # Убедитесь, что 'import copy' есть в начале файла
+        import copy
 
-        # Создаем ГЛУБОКУЮ КОПИЮ отчета, чтобы не испортить оригинал в state
         light_report = copy.deepcopy(state.get("analysis_report", {}))
 
-        # Добавляем новостям уникальные ID для ссылок и убираем тяжелые тексты
         news_sources_keys = ["agroinvestor_news", "ria_news_forecast"]
-        # Создаем специальный список для краткого ответа, чтобы LLM было проще
         short_news_list = []
 
         for key in news_sources_keys:
@@ -692,18 +650,16 @@ class DialogueManager:
         # Используем "облегченный" отчет для промпта
         context_for_prompt = json.dumps(light_report, ensure_ascii=False, indent=2)
 
-        # --- ИСПРАВЛЕНИЕ: Системный промпт упрощен и сфокусирован ---
         system_prompt = (
             "Ты — дружелюбный финансовый консультант. Твоя задача — отвечать на вопросы пользователя, основываясь ИСКЛЮЧИТЕЛЬНО на фактах из JSON-контекста. "
             "Веди диалог естественно. Не выдумывай информацию. "
             "Если пользователь просит общий обзор новостей, предоставь краткий список заголовков, используя `reference_id` из контекста."
         )
 
-        # --- ИСПРАВЛЕНИЕ: Промпт пользователя теперь использует "облегченный" контекст ---
         user_prompt = (
             f"**КОНТЕКСТ (досье по компании «{state['company_name']}»):**\n"
             f"```json\n{context_for_prompt}\n```\n\n"
-            f"**СПИСОК НОВОСТЕЙ С ID:**\n"  # Явно даем список для удобства LLM
+            f"**СПИСОК НОВОСТЕЙ С ID:**\n" 
             f"{json.dumps(short_news_list, ensure_ascii=False, indent=2)}\n\n"
             f"**ИСТОРИЯ ДИАЛОГА:**\n{json.dumps(state['history'], ensure_ascii=False)}\n\n"
             f"**НОВЫЙ ВОПРОС ПОЛЬЗОВАТЕЛЯ:** '{user_text}'\n\n"
@@ -728,7 +684,6 @@ class DialogueManager:
                 .replace("##", "")
                 .replace("`", "")
             )
-            # Удаляем старый ответ из истории, чтобы не дублировать
             if state["history"] and state["history"][-1]["role"] == "user":
                 state["history"].pop()
 
@@ -739,7 +694,6 @@ class DialogueManager:
             logger.error(f"Ошибка при генерации диалогового ответа: {e}", exc_info=True)
             return "Произошла ошибка при обработке вашего вопроса. Попробуйте переформулировать."
 
-    # <<< ЗАМЕНИТЕ ЭТУ ФУНКЦИЮ ПОЛНОСТЬЮ >>>
     async def handle_message(self, user_id: str, text: str) -> str:
         logger.info(f"Получено сообщение от {user_id}: '{text}'")
         state = self.get_or_create_state(user_id)
@@ -757,10 +711,7 @@ class DialogueManager:
             intent = nlu_result.get("intent")
             entities = nlu_result.get("entities")
 
-            # <<< КЛЮЧЕВОЕ УЛУЧШЕНИЕ: КОНТЕКСТНАЯ ПРОВЕРКА >>>
-            # Проверяем, есть ли у нас в памяти аналитическая статья.
-            # Если да, и пользователь просит детали, то принудительно вызываем нужный обработчик.
-            # Это защищает нас от ошибок NLU.
+
             has_analytics = state.get("analysis_report", {}).get("analytics_article")
             is_details_request = any(
                 keyword in text.lower()
@@ -772,7 +723,6 @@ class DialogueManager:
                     "Контекст аналитики найден. Принудительно вызываю детализацию аналитики."
                 )
                 return await self._handle_analytical_details_query(text, state)
-            # <<< КОНЕЦ УЛУЧШЕНИЯ >>>
 
             # 3. Стандартная логика маршрутизации на основе NLU
             if intent == "analyze_msh_for_client":
@@ -829,7 +779,6 @@ class DialogueManager:
             find_category_by_okved(okved_code) if okved_code else "Не определена"
         )
 
-        # 3. Формируем "умные" промпты для LLM
         system_prompt = (
             "Ты — ведущий отраслевой аналитик банка. Твоя задача — подготовить для сотрудника развернутую, "
             "но сжатую аналитическую справку по отрасли его клиента. Говори профессионально, по делу и структурированно."
