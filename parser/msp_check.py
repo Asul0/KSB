@@ -1,5 +1,3 @@
-# Файл: parsers/msp_check.py (ФИНАЛЬНАЯ ИСПРАВЛЕННАЯ ВЕРСИЯ)
-
 import logging
 import time
 import os
@@ -9,11 +7,9 @@ from selenium.common.exceptions import TimeoutException
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 
-# --- Настройки ---
 RMSP_URL = "https://rmsp.nalog.ru/"
 DEBUG_DIR = "debug_logs"
 
-# --- Настройка логирования ---
 logging.basicConfig(
     level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s"
 )
@@ -72,12 +68,10 @@ def get_msp_category(inn_to_check: str) -> str | None:
                 tbody = element.find_element(By.XPATH, "./parent::tbody")
                 columns = tbody.find_elements(By.TAG_NAME, "td")
 
-                # Извлекаем категорию и приводим к нижнему регистру для унификации
                 category_text = (
                     columns[1].text.strip().lower()
-                )  # "Микропредприятие" -> "микропредприятие"
+                )  
 
-                # Возвращаем результат
                 return category_text
             else:
                 logging.warning(f"ИНН {inn_to_check} не найден в реестре МСП.")
@@ -98,7 +92,6 @@ def get_msp_category(inn_to_check: str) -> str | None:
             driver.quit()
 
 
-# Блок для самостоятельной проверки скрипта
 if __name__ == "__main__":
     print("--- Утилита проверки ИНН в реестре МСП ---")
     test_inn = input("Введите ИНН для теста: ").strip()
