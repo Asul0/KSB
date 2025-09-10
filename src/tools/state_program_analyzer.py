@@ -1,20 +1,16 @@
-# src/tools/state_program_analyzer.py (ВЕРСИЯ С БЕЗОПАСНЫМ СБОРОМ ДОСЬЕ)
 
 import asyncio
 import logging
 from typing import Dict, Any
 
-# --- Импорты программ-проверщиков (без изменений) ---
 from program import belarus, novye_territorii, mskh, prigranichye, sovmeshchennaya
 
-# --- Импорты ВСЕХ необходимых парсеров (без изменений) ---
 from parser import cb, egrul, msp_check, msx_limit
 from parser.full_cheko import get_company_data_by_inn_async
 
 
 logger = logging.getLogger(__name__)
 
-# <<< ВОЗВРАЩАЕМ СЕМАФОР, НО ИСПОЛЬЗУЕМ ЕГО НА ЭТАПЕ СБОРА ДАННЫХ >>>
 SELENIUM_SEMAPHORE = asyncio.Semaphore(1)
 
 PROGRAM_CHECKERS = {
@@ -26,7 +22,6 @@ PROGRAM_CHECKERS = {
 }
 
 
-# <<< ЗАМЕНИТЕ ЭТУ ФУНКЦИЮ ПОЛНОСТЬЮ >>>
 async def _gather_company_dossier_async(inn: str) -> Dict[str, Any]:
     """
     (ФИНАЛЬНАЯ ВЕРСИЯ) Собирает досье. Selenium-задачи выполняются последовательно,
@@ -45,15 +40,12 @@ async def _gather_company_dossier_async(inn: str) -> Dict[str, Any]:
             return result
     
     tasks = {
-        # Задачи, использующие Selenium:
         "full_cheko_data": _safe_selenium_task(get_company_data_by_inn_async, inn),
         "is_in_egrul": _safe_selenium_task(egrul.check_inn_on_nalog_ru_selenium, inn),
         "msp_category": _safe_selenium_task(msp_check.get_msp_category, inn),
         
-        # Легкие задачи, которые теперь не ждут Selenium:
         "cbr_rate_data": asyncio.to_thread(cb.get_cbr_key_rate),
         "msh_limits_data": asyncio.to_thread(msx_limit.get_subsidy_limits),
-        # Проверка СЭЗ теперь вызывается и кэшируется внутри check_novye_territorii_program
     }
 
     results = await asyncio.gather(*tasks.values(), return_exceptions=True)
@@ -76,7 +68,6 @@ async def _gather_company_dossier_async(inn: str) -> Dict[str, Any]:
     return dossier
 
 
-# <<< Эта функция остается БЕЗ ИЗМЕНЕНИЙ, так как вся логика инкапсулирована выше >>>
 async def run_state_programs_check(inn: str) -> Dict[str, Any]:
     logger.info(f"Запуск анализа по всем госпрограммам для ИНН: {inn}")
     
