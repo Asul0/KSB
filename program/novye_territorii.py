@@ -1,10 +1,8 @@
-# programs/novye_territorii.py (ИСПРАВЛЕННАЯ ВЕРСИЯ С BASE_CONDITIONS)
 import logging
 import asyncio
 from parser import cb
 from parser.nt import get_sez_inns
 
-# Кэш для хранения списка ИНН
 _cached_sez_inns = None
 
 async def _get_sez_inns_cached() -> set:
@@ -20,7 +18,6 @@ async def _get_sez_inns_cached() -> set:
             logging.info(f"[Кэш СЭЗ] Кэш успешно заполнен. Найдено {len(_cached_sez_inns)} ИНН.")
     return _cached_sez_inns
 
-# --- ИЗМЕНЕНИЕ 1: Добавляем блок с базовыми условиями ---
 BASE_CONDITIONS_TEXT = """
 - **Цели кредита:** Реализация инвестиционных проектов на территориях СЭЗ (ДНР, ЛНР, Запорожская и Херсонская области). До 20% от суммы кредита можно направить на пополнение оборотных средств.
 - **Сумма кредита:** От 1 миллиона до 5 миллиардов рублей.
@@ -29,7 +26,6 @@ BASE_CONDITIONS_TEXT = """
 - **Основное требование:** Компания должна быть участником свободной экономической зоны (СЭЗ).
 """
 
-# <<< ЗАМЕНИТЕ ЭТУ ФУНКЦИЮ ПОЛНОСТЬЮ >>>
 async def check_novye_territorii_program(company_dossier: dict) -> dict:
     inn = company_dossier.get("inn", "N/A")
     log_prefix = f"[Новые территории, ИНН {inn}]"
@@ -42,7 +38,6 @@ async def check_novye_territorii_program(company_dossier: dict) -> dict:
     }
 
     try:
-        # --- ШАГ 1 (НОВЫЙ): Ранний расчет ставки ---
         check_log.append("Шаг 1: Расчет потенциальной льготной ставки на основе ключевой ставки ЦБ.")
         key_rate_str = company_dossier.get("cbr_key_rate")
         key_rate_date = company_dossier.get("cbr_key_rate_date")
@@ -69,7 +64,6 @@ async def check_novye_territorii_program(company_dossier: dict) -> dict:
         
         result["analysis_data"]["rate_text"] = rate_calculation_text
 
-        # --- ШАГ 2: Проверка в реестре СЭЗ ---
         check_log.append("Шаг 2: Проверка нахождения компании в Едином реестре участников СЭЗ.")
         sez_inns_set = await _get_sez_inns_cached()
         is_in_registry = inn in sez_inns_set
@@ -84,7 +78,6 @@ async def check_novye_territorii_program(company_dossier: dict) -> dict:
             return result
         check_log.append("✅ РЕЗУЛЬТАТ: Компания найдена в реестре СЭЗ.")
 
-        # --- ШАГ 3: Формирование УСПЕШНОГО ответа ---
         calculated_conditions_text = (
             f"- Цели кредита: Реализация инвестпроекта в СЭЗ (до 20% на оборотные средства).\n"
             f"- Сумма кредита: От 1 млн до 5 млрд рублей.\n"
