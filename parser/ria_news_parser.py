@@ -5,7 +5,6 @@ import time
 import os
 from urllib.parse import urljoin
 
-# --- ИМПОРТЫ ДЛЯ SELENIUM ---
 from selenium import webdriver
 from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import WebDriverWait
@@ -15,22 +14,18 @@ from selenium.webdriver.chrome.service import Service as ChromeService
 from webdriver_manager.chrome import ChromeDriverManager
 from bs4 import BeautifulSoup
 
-# --- 1. НАСТРОЙКИ ---
 logging.basicConfig(
     level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s"
 )
 logging.getLogger("selenium").setLevel(logging.WARNING)
 logging.getLogger("webdriver_manager").setLevel(logging.WARNING)
 
-# Константы
 RIA_SEARCH_URL = "https://sn.ria.ru/search/?query=%D0%BF%D1%80%D0%BE%D0%B3%D0%BD%D0%BE%D0%B7+%D1%83%D1%80%D0%BE%D0%B6%D0%B0%D1%8F+2025"
 HEADERS = {
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36"
 }
-# Сколько новостей мы хотим собрать
 NEWS_LIMIT = 3
 
-# --- 2. УНИВЕРСАЛЬНАЯ ФУНКЦИЯ ЗАГРУЗКИ ---
 
 
 def get_html_with_selenium(url: str, wait_for_selector: str) -> str | None:
@@ -48,7 +43,6 @@ def get_html_with_selenium(url: str, wait_for_selector: str) -> str | None:
     )
     options.add_experimental_option("useAutomationExtension", False)
 
-    # Режим без UI (headless) - можно включить после отладки
     options.add_argument("--headless=new")
 
     options.add_argument("--window-size=1920,1080")
@@ -69,7 +63,7 @@ def get_html_with_selenium(url: str, wait_for_selector: str) -> str | None:
         WebDriverWait(driver, 30).until(
             EC.presence_of_element_located((By.CSS_SELECTOR, wait_for_selector))
         )
-        time.sleep(2)  # Страховочная пауза
+        time.sleep(2) 
 
         logging.info("Ключевой элемент найден. Получаем HTML-код.")
         return driver.page_source
@@ -90,8 +84,6 @@ def get_html_with_selenium(url: str, wait_for_selector: str) -> str | None:
             driver.quit()
 
 
-# --- 3. ФУНКЦИИ-ПАРСЕРЫ ДЛЯ РИА НОВОСТИ ---
-
 
 def find_ria_news_links() -> list[dict] | None:
     """
@@ -99,7 +91,7 @@ def find_ria_news_links() -> list[dict] | None:
     """
     logging.info(f"ШАГ 1: Поиск новостей на странице {RIA_SEARCH_URL}...")
 
-    wait_selector = "div.list"  # Ждем появления контейнера со списком
+    wait_selector = "div.list" 
     html_content = get_html_with_selenium(RIA_SEARCH_URL, wait_selector)
 
     if not html_content:
@@ -112,7 +104,6 @@ def find_ria_news_links() -> list[dict] | None:
         all_items = soup.select("div.list > div.list-item")
 
         for item in all_items:
-            # Проверяем, не авторская ли это колонка
             if item.find("div", class_="list-item__author"):
                 logging.info("Пропущена авторская колонка.")
                 continue
@@ -123,7 +114,6 @@ def find_ria_news_links() -> list[dict] | None:
                     {"title": link_tag.get_text(strip=True), "url": link_tag["href"]}
                 )
 
-            # Если мы уже набрали нужное количество новостей, выходим из цикла
             if len(news_list) >= NEWS_LIMIT:
                 break
 
@@ -149,7 +139,6 @@ def fetch_ria_article_text(url: str) -> str:
     """
     logging.info(f"ШАГ 2: Извлечение текста со страницы {url}...")
 
-    # Ждем появления главного контейнера статьи
     wait_selector = "div.layout-article__main"
     html_content = get_html_with_selenium(url, wait_selector)
 
@@ -159,7 +148,6 @@ def fetch_ria_article_text(url: str) -> str:
     try:
         soup = BeautifulSoup(html_content, "lxml")
 
-        # 1. Находим главный контейнер статьи
         main_content = soup.select_one(wait_selector)
         if not main_content:
             logging.warning(
@@ -167,24 +155,20 @@ def fetch_ria_article_text(url: str) -> str:
             )
             return "Главный контейнер статьи не найден."
 
-        # 2. Внутри него ищем только блоки с текстом
         text_blocks = main_content.select('div.article_block[data-type="text"]')
 
         if not text_blocks:
             logging.warning(
                 f"Не найдены текстовые блоки 'article_block[data-type=\"text\"]' на странице {url}"
             )
-            # Попробуем старый метод как запасной вариант
             text_divs = main_content.find_all("div", class_="article__text")
             if not text_divs:
                 return "Текстовые блоки на странице не найдены."
             full_text = " ".join([div.get_text(strip=True) for div in text_divs])
             return full_text
 
-        # 3. Собираем текст из этих блоков
         all_paragraphs = []
         for block in text_blocks:
-            # Внутри каждого блока может быть один или несколько div'ов с текстом
             text_divs = block.find_all("div", class_="article__text")
             for div in text_divs:
                 all_paragraphs.append(div.get_text(strip=True))
@@ -200,9 +184,6 @@ def fetch_ria_article_text(url: str) -> str:
         return f"Ошибка парсинга статьи: {e}"
 
 
-# --- 4. ГЛАВНАЯ ФУНКЦИЯ-ОРКЕСТРАТОР ---
-
-
 async def get_ria_news_async() -> dict:
     """
     Основная асинхронная функция, которая запускает и координирует весь процесс.
@@ -212,13 +193,11 @@ async def get_ria_news_async() -> dict:
 
     loop = asyncio.get_running_loop()
 
-    # Шаг 1: Получаем список новостей (блокирующая операция, выполняем в отдельном потоке)
     news_links = await loop.run_in_executor(None, find_ria_news_links)
 
     if not news_links:
         return {"status": "failure", "error": "Не удалось найти ссылки на новости."}
 
-    # Шаг 2: Параллельно загружаем полные тексты
     logging.info(f"ШАГ 3: Загрузка полных текстов для {len(news_links)} статей...")
 
     tasks = [
@@ -227,7 +206,6 @@ async def get_ria_news_async() -> dict:
     ]
     full_texts = await asyncio.gather(*tasks)
 
-    # Собираем финальный результат
     final_data = []
     for i, item in enumerate(news_links):
         final_data.append(
@@ -246,7 +224,6 @@ async def get_ria_news_async() -> dict:
     return {"status": "success", "data": final_data}
 
 
-# --- 5. БЛОК ДЛЯ ТЕСТИРОВАНИЯ ---
 
 if __name__ == "__main__":
     if os.name == "nt":
