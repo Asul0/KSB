@@ -1,5 +1,3 @@
-# Файл: programs/prigranichye.py
-
 import logging
 import asyncio
 import re
@@ -97,7 +95,6 @@ async def check_prigranichye_program(company_dossier: dict) -> dict:
     }
 
     try:
-        # --- ШАГ 1: Раннее определение ставки ---
         check_log.append("Шаг 1: Получение ключевой ставки ЦБ для информации.")
         key_rate_str = company_dossier.get("cbr_key_rate")
         key_rate_date = company_dossier.get("cbr_key_rate_date")
@@ -106,7 +103,6 @@ async def check_prigranichye_program(company_dossier: dict) -> dict:
         if key_rate_str:
              result["analysis_data"]["final_rate"] = float(key_rate_str.replace(",", "."))
 
-        # --- ШАГ 2: Анализ данных о компании ---
         check_log.append("Шаг 2: Анализ данных о компании для определения региона и ОКВЭД.")
         full_cheko_data = company_dossier.get("full_cheko_data", {})
         if not full_cheko_data:
@@ -117,7 +113,6 @@ async def check_prigranichye_program(company_dossier: dict) -> dict:
         general_info = full_cheko_data.get("general_info", {})
         okved_data = full_cheko_data.get("okved_data", {})
 
-        # --- ШАГ 3 (НОВЫЙ): Проверка в реестре МСП ---
         check_log.append("Шаг 3: Проверка в Едином реестре субъектов МСП.")
         msp_category = company_dossier.get("msp_category")
         if not msp_category:
@@ -128,7 +123,6 @@ async def check_prigranichye_program(company_dossier: dict) -> dict:
         check_log.append(f"✅ РЕЗУЛЬТАТ: Компания найдена, категория - '{clean_msp_category}'.")
 
 
-        # --- ШАГ 4: Проверка региона ---
         company_region = _get_company_region(general_info.get("address"))
         check_log.append(f"Шаг 4: Проверка региона компании ('{company_region}') на вхождение в список приграничных.")
         if not company_region or not any(r in company_region for r in ALLOWED_REGIONS):
@@ -137,7 +131,6 @@ async def check_prigranichye_program(company_dossier: dict) -> dict:
             return result
         check_log.append(f"✅ РЕЗУЛЬТАТ: Регион '{company_region}' подходит.")
 
-        # --- ШАГ 5: Проверка ОКВЭД ---
         check_log.append("Шаг 5: Проверка ОКВЭД на наличие запрещенных видов деятельности.")
         if not okved_data or not okved_data.get("main_okved"):
             result.update({"passed": False, "reason": "Не удалось получить данные по ОКВЭД.", "check_log": check_log})
@@ -151,7 +144,6 @@ async def check_prigranichye_program(company_dossier: dict) -> dict:
             return result
         check_log.append("✅ РЕЗУЛЬТАТ: Запрещенные ОКВЭД не найдены.")
 
-        # --- ШАГ 6: Формирование УСПЕШНОГО ответа ---
         calculated_conditions = (
             f"- Цель кредита: Оборотное/инвестиционное/рефинансирование.\n"
             f"- Сумма кредита: Не более 30 млн руб.\n"
