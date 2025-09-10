@@ -1,5 +1,3 @@
-# Файл: parsers/cb.py (ИСПРАВЛЕННАЯ ВЕРСИЯ)
-
 import requests
 import logging
 import re
@@ -7,17 +5,14 @@ from bs4 import BeautifulSoup
 from fake_useragent import UserAgent
 from requests.exceptions import RequestException
 
-# --- Настройки ---
 CBR_KEY_RATE_URL = "https://www.cbr.ru/hd_base/keyrate/"
 TABLE_HEADERS = ["Дата", "Ставка"]
 
-# --- Настройка логирования ---
 logging.basicConfig(
     level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s"
 )
 
 
-# ... (функции find_key_rate_table, parse_rate_from_table, validate_data остаются БЕЗ ИЗМЕНЕНИЙ) ...
 def find_key_rate_table(soup):
     all_tables = soup.find_all("table")
     logging.info(
@@ -95,13 +90,11 @@ def get_cbr_key_rate():
             return None, None
 
         if not validate_data(date, rate):
-            # Даже если валидация не пройдена, мы все равно вернем данные,
-            # но предупредим в логах.
+
             logging.warning(
                 "Формат данных может быть некорректным, но мы их возвращаем."
             )
 
-        # ГЛАВНОЕ ИЗМЕНЕНИЕ: Возвращаем результат для использования в других скриптах
         return rate, date
 
     except RequestException as e:
@@ -112,8 +105,6 @@ def get_cbr_key_rate():
         return None, None
 
 
-# Этот блок теперь используется только для прямой проверки скрипта.
-# Логика печати вынесена сюда.
 if __name__ == "__main__":
     rate_result, date_result = get_cbr_key_rate()
 
