@@ -1,6 +1,3 @@
-# src/tools/company_data_parser.py
-# (Бывший full_cheko.py, адаптированный для использования в проекте)
-
 import requests
 from bs4 import BeautifulSoup
 import logging
@@ -19,11 +16,6 @@ from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 
 
-# УДАЛИТЬ или закомментировать эти строки
-# from selenium.webdriver.chrome.service import Service as ChromeService
-# from webdriver_manager.chrome import ChromeDriverManager
-# --- 1. ОБЩИЕ НАСТРОЙКИ ---
-# Настройка логирования будет на уровне всего приложения, но оставим для отладки
 logging.basicConfig(
     level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s"
 )
@@ -35,7 +27,6 @@ HEADERS = {
 }
 DEBUG_DIR = "debug_html"
 
-# --- 2. УНИВЕРСАЛЬНЫЕ ФУНКЦИИ (ПОИСК И ЗАГРУЗКА) ---
 
 
 def save_debug_html(html_content: str, inn: str):
@@ -84,13 +75,12 @@ def get_full_page_html_with_selenium(url: str) -> str | None:
 
     driver = None
     try:
-        # Используем кэшированный драйвер, чтобы не скачивать каждый раз
         driver = webdriver.Chrome(options=options)
         driver.get(url)
         WebDriverWait(driver, 20).until(
             EC.presence_of_element_located((By.CSS_SELECTOR, "main.flex-shrink-0"))
         )
-        time.sleep(1)  # Небольшая пауза для полной прогрузки
+        time.sleep(1)
         logging.info("ПАРСЕР: Страница успешно загружена, HTML получен.")
         return driver.page_source
     except TimeoutException:
@@ -106,8 +96,6 @@ def get_full_page_html_with_selenium(url: str) -> str | None:
             driver.quit()
 
 
-# --- 3. ФУНКЦИИ-ПАРСЕРЫ ---
-
 
 def parse_company_name(soup: BeautifulSoup) -> str:
     """
@@ -115,7 +103,6 @@ def parse_company_name(soup: BeautifulSoup) -> str:
     1. Ищет в заголовке H1 на странице.
     2. Если не найдено, ищет в HTML-теге <title> страницы.
     """
-    # --- Попытка №1: Найти в главном заголовке H1 (как и раньше) ---
     main_content = soup.find("article", class_="rc") or soup
 
     title_tag = main_content.find("h1", class_="card-title")
@@ -124,20 +111,16 @@ def parse_company_name(soup: BeautifulSoup) -> str:
         if company_name:
             return company_name
 
-    # --- Попытка №2: Извлечь из тега <title> (надежный запасной вариант) ---
     title_tag_head = soup.find("title")
     if title_tag_head:
-        # Текст в <title> обычно выглядит так: "ООО «АГРОФИРМА», ИНН 123 – ..."
-        # Мы берем только часть до первой запятой.
+
         full_title = title_tag_head.get_text(strip=True)
         if "," in full_title:
             company_name = full_title.split(",")[0].strip()
-            # Убираем лишние кавычки, если они есть
             company_name = company_name.strip("«»\"\"''")
             if company_name:
                 return company_name
 
-    # Если оба способа не сработали, возвращаем пустую строку
     return ""
 
 
@@ -260,8 +243,6 @@ def parse_founders_data(full_soup: BeautifulSoup) -> list[str]:
     return report_lines
 
 
-# --- 4. ГЛАВНАЯ ФУНКЦИЯ-ОРКЕСТРАТОР ---
-
 
 def _run_parsing_logic(inn: str) -> dict:
     """Синхронная функция, которая выполняет всю логику парсинга."""
@@ -273,21 +254,15 @@ def _run_parsing_logic(inn: str) -> dict:
     if not full_html:
         return {"error": "Не удалось получить HTML-код страницы компании."}
 
-    # Для отладки можно сохранять HTML
-    # save_debug_html(full_html, inn)
 
     soup = BeautifulSoup(full_html, "lxml")
     main_content = soup.find("article", class_="rc")
     if not main_content:
-        main_content = soup  # Fallback
-
-    # Собираем все данные
+        main_content = soup 
     company_name = parse_company_name(soup)
     general_data = parse_general_info(main_content)
     okved_data = parse_okved_data(company_url)
     founders_lines = parse_founders_data(soup)
-
-    # Формируем итоговый словарь
     return {
         "inn": inn,
         "company_url": company_url,
@@ -306,12 +281,10 @@ async def get_company_data_by_inn_async(inn: str) -> dict:
     """
     logging.info(f"Запуск асинхронной задачи парсинга для ИНН: {inn}")
     loop = asyncio.get_running_loop()
-    # Запускаем синхронную блокирующую функцию в отдельном потоке, чтобы не блокировать event loop
     result_dict = await loop.run_in_executor(None, _run_parsing_logic, inn)
     return result_dict
 
 
-# --- 5. БЛОК ДЛЯ САМОСТОЯТЕЛЬНОГО ЗАПУСКА И ТЕСТИРОВАНИЯ ---
 if __name__ == "__main__":
 
     async def main():
@@ -320,7 +293,6 @@ if __name__ == "__main__":
             input_inn = input("Введите ИНН организации для теста: ").strip()
             if input_inn:
                 data = await get_company_data_by_inn_async(input_inn)
-                # Красивый вывод результата для теста
                 import json
 
                 print("\n--- РЕЗУЛЬТАТ ПАРСИНГА (в формате JSON) ---")
