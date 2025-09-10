@@ -1,13 +1,10 @@
-# Файл: programs/mskh.py (ФИНАЛЬНАЯ ВЕРСИЯ С РАСЧЕТОМ РАЗМЕРА СУБСИДИИ)
 import re
 import logging
 import asyncio
 import json
 from pathlib import Path
 
-# ==============================================================================
-# <<< ШАГ 1: ЗАГРУЗКА И ПОДГОТОВКА ДАННЫХ ИЗ ДВУХ JSON-ФАЙЛОВ >>>
-# ==============================================================================
+
 
 
 def load_data_from_json(filename: str):
@@ -22,7 +19,6 @@ def load_data_from_json(filename: str):
         return None
 
 
-# Загружаем правила ОКВЭД
 okved_rules = load_data_from_json("msh_okveds.json")
 (
     ALLOWED_OKVEDS_STANDARD,
@@ -45,14 +41,11 @@ if okved_rules:
             OKVED_TO_CATEGORY_MAP[code] = category
     ALL_ALLOWED_OKVEDS = ALLOWED_OKVEDS_STANDARD.union(ALLOWED_OKVEDS_CLARIFICATION)
 
-# <<< НОВОЕ: Загружаем кредитные лимиты >>>
 CREDIT_LIMITS_DATA = load_data_from_json("msh_credit_limits.json") or {}
 
-# Константы для логики программы
 PRIORITY_OKVED_CATEGORIES_MSH = {"Молочное животноводство", "Растениеводство"}
 MEDICAL_FOOD_OKVEDS = {"10.86"}
 
-# <<< НОВОЕ: Обновляем BASE_CONDITIONS_TEXT с информацией о субсидии >>>
 BASE_CONDITIONS_TEXT = """
 - **Цели кредита:** Оборотное/инвестиционное/проектное финансирование в соответствии с ДКЦ.
 - **Типы кредитов:** Краткосрочные (до 1 года) и инвестиционные (от 2 до 15 лет).
@@ -78,7 +71,6 @@ def _get_company_region(address: str) -> str | None:
     address_lower = address.lower()
     parts = [part.strip() for part in address_lower.split(",")]
 
-    # Определяем синонимы для каждого стандартизированного названия региона
     region_map = {
         "область": [r"\bобл\b", r"\bобласть\b"],
         "край": [r"\bкрай\b"],
@@ -86,31 +78,22 @@ def _get_company_region(address: str) -> str | None:
         "автономный округ": [r"\bао\b"],
     }
 
-    # Отдельно проверяем города федерального значения
     federal_cities = ["москва", "санкт-петербург", "севастополь"]
 
     for part in parts:
-        # Проверка на города федерального значения
         for city in federal_cities:
-            # Ищем точное вхождение, чтобы избежать ложных срабатываний (напр., "московская область")
             if f"г. {city}" == part or city == part:
                 return f"г. {city.capitalize()}"
 
-        # Проверка на другие типы регионов
         for standard_name, patterns in region_map.items():
             for pattern in patterns:
                 if re.search(pattern, part):
-                    # Нашли! Заменяем ключевое слово (целое слово) на пустую строку
                     region_name_part = re.sub(pattern, "", part).strip()
-                    # Делаем заглавными первые буквы и добавляем полное название типа
                     return f"{region_name_part.title()} {standard_name}"
 
     return parts[1].strip().title() if len(parts) > 1 else None
 
 
-# ==============================================================================
-# <<< ШАГ 2: ОСНОВНАЯ ЛОГИКА ПРОВЕРКИ С НОВЫМ РАСЧЕТОМ >>>
-# ==============================================================================
 async def check_msh_program(company_dossier: dict) -> dict:
     inn = company_dossier.get("inn", "N/A")
     log_prefix = f"[МСХ, ИНН {inn}]"
@@ -127,7 +110,6 @@ async def check_msh_program(company_dossier: dict) -> dict:
     }
 
     try:
-        # --- ШАГ 1: Проверка базовых данных (ЕГРЮЛ, ОКВЭД) ---
         check_log.append("Шаг 1: Проверка наличия компании в ЕГРЮЛ и базовых данных.")
         if not company_dossier.get("is_in_egrul"):
             result.update({"passed": False, "reason": "Компания не найдена в ЕГРЮЛ.", "check_log": check_log})
@@ -139,8 +121,6 @@ async def check_msh_program(company_dossier: dict) -> dict:
             return result
         check_log.append("✅ РЕЗУЛЬТАТ: Компания найдена, данные по ОКВЭД присутствуют.")
         
-        # --- ШАГ 2: Ранний анализ ОКВЭД и расчеты ---
-        # Определяем категорию, приоритетность и выполняем расчеты ДО "жестких" проверок
         check_log.append("Шаг 2: Анализ ОКВЭД и ранний расчет потенциальных условий.")
         company_okveds_list = [okved_data["main_okved"]] + okved_data.get("additional_okved", [])
         company_okved_codes = {o["code"] for o in company_okveds_list}
@@ -159,7 +139,6 @@ async def check_msh_program(company_dossier: dict) -> dict:
         result["analysis_data"]["is_priority"] = is_priority
         check_log.append(f"   - Определена категория '{relevant_category}' (Приоритет: {is_priority}).")
         
-        # Расчет ставки
         key_rate_str = company_dossier.get("cbr_key_rate")
         key_rate_date = company_dossier.get("cbr_key_rate_date")
         ks = 0.0
@@ -179,7 +158,6 @@ async def check_msh_program(company_dossier: dict) -> dict:
                 result["analysis_data"]["rate_text"] = f"Ставка от Ключевой Ставки ЦБ ({ks:.2f}% на {key_rate_date}).\nРасчет: {rate_desc}"
             except (ValueError, TypeError): pass
         
-        # Расчет субсидии
         company_region = _get_company_region(full_cheko_data.get("general_info", {}).get("address"))
         if company_region and CREDIT_LIMITS_DATA and ks > 0:
             region_limits = CREDIT_LIMITS_DATA.get(company_region)
@@ -194,7 +172,6 @@ async def check_msh_program(company_dossier: dict) -> dict:
                     result["analysis_data"]["calculated_subsidy"] = subsidy_amount
                     result["analysis_data"]["subsidy_text"] = f"**{subsidy_amount:,.2f} рублей**.".replace(",", " ")
 
-        # --- ШАГ 3: Проверка соответствия ОКВЭД ---
         check_log.append("Шаг 3: Проверка соответствия ОКВЭД требованиям программы.")
         if not matched_codes:
             reason = "Ни один из ОКВЭД компании не соответствует требованиям программы."
@@ -202,7 +179,6 @@ async def check_msh_program(company_dossier: dict) -> dict:
             return result
         check_log.append(f"✅ РЕЗУЛЬТАТ: Найдены соответствующие ОКВЭД: {', '.join(matched_codes)}.")
 
-        # --- ШАГ 4: Проверка доли иностранных учредителей ---
         check_log.append("Шаг 4: Проверка доли иностранных учредителей из офшорных зон.")
         founders_data = full_cheko_data.get("founders_data", [])
         foreign_share = sum(float(re.search(r"(\d+[.,]?\d*)\s*%", line).group(1).replace(",", ".")) for line in founders_data if "Россия" not in line and any(c in line for c in ["Кипр", "Сейшелы", "Белиз"]) and re.search(r"(\d+[.,]?\d*)\s*%", line))
@@ -212,7 +188,6 @@ async def check_msh_program(company_dossier: dict) -> dict:
             return result
         check_log.append(f"✅ РЕЗУЛЬТАТ: Доля офшоров ({foreign_share}%) не превышает 25%.")
 
-        # --- ШАГ 5: Формирование успешного ответа ---
         manual_steps_text = "- Предоставить в банк справки: об отсутствии задолженности (ФНС), о статусе сельхозтоваропроизводителя (форма 6-АПК).\n"
         manual_steps_text += f"- Расчетный размер годовой субсидии: {result['analysis_data']['subsidy_text']}"
         if company_okved_codes.intersection(ALLOWED_OKVEDS_CLARIFICATION):
