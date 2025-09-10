@@ -6,13 +6,11 @@ import re
 import logging
 import time
 
-# Правильный относительный импорт для вашей структуры проекта
 from src.config import settings
 
 logger = logging.getLogger(__name__)
 
 
-# Вспомогательная функция для безопасного преобразования
 def safe_float_convert(value: str) -> Optional[float]:
     try:
         return float(value.replace(",", "."))
@@ -39,11 +37,9 @@ class GigaChatNLU:
                 if purpose == "extraction"
                 else settings.GIGACHAT_MAX_TOKENS_FORMATTING
             )
-            # Увеличим токен для NLU, чтобы избежать проблем с длинными контекстами
             if purpose == "extraction":
                 max_tokens_to_use = 450
 
-            # Увеличим токен и для форматирования
             if purpose == "formatting":
                 max_tokens_to_use = 550
 
@@ -229,7 +225,6 @@ class GigaChatNLU:
 
                     return {
                         "intent": intent,
-                        # <<< ИЗМЕНЕНИЕ: Всегда возвращаем словарь, даже если он пустой >>>
                         "entities": entities if isinstance(entities, dict) else {},
                         "_nlu_error": None,
                     }
