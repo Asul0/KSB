@@ -7,7 +7,6 @@ import json
 import time
 import os
 
-# --- НОВЫЕ ИМПОРТЫ ДЛЯ SELENIUM ---
 from selenium import webdriver
 from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import WebDriverWait
@@ -17,7 +16,6 @@ from selenium.webdriver.chrome.service import Service as ChromeService
 from webdriver_manager.chrome import ChromeDriverManager
 
 
-# --- 1. НАСТРОЙКИ ---
 logging.basicConfig(
     level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s"
 )
@@ -31,7 +29,6 @@ HEADERS = {
 }
 
 
-# --- НОВАЯ ФУНКЦИЯ ДЛЯ ПОЛУЧЕНИЯ HTML ЧЕРЕЗ SELENIUM ---
 def get_html_with_selenium(url: str, wait_for_selector: str) -> str | None:
     """
     УНИВЕРСАЛЬНАЯ ФУНКЦИЯ: Загружает страницу и "умно" ждет появления
@@ -48,8 +45,7 @@ def get_html_with_selenium(url: str, wait_for_selector: str) -> str | None:
     )
     options.add_experimental_option("useAutomationExtension", False)
 
-    # Пока оставляем закомментированным для отладки
-    # options.add_argument("--headless=new")
+
 
     options.add_argument("--window-size=1920,1080")
     options.add_argument("--no-sandbox")
@@ -66,12 +62,10 @@ def get_html_with_selenium(url: str, wait_for_selector: str) -> str | None:
 
         driver.get(url)
 
-        # "УМНОЕ" ОЖИДАНИЕ (до 30 секунд)
         WebDriverWait(driver, 30).until(
             EC.presence_of_element_located((By.CSS_SELECTOR, wait_for_selector))
         )
 
-        # Дополнительная пауза для полной "отрисовки"
         time.sleep(2)
 
         logging.info("Ключевой элемент найден. Ожидание завершено, получаем HTML-код.")
@@ -99,7 +93,6 @@ def find_latest_digest_url() -> str | None:
     """
     logging.info(f"ШАГ 1: Поиск последней подборки на странице {ARCHIVE_URL}...")
 
-    # Указываем, какой элемент ждать на странице архива
     wait_selector = "div.news-list"
     html_content = get_html_with_selenium(ARCHIVE_URL, wait_selector)
 
@@ -161,11 +154,9 @@ def parse_digest_page(digest_url: str) -> list[dict] | None:
             title = h2.get_text(strip=True)
             summary_p = h2.find_next_sibling("p")
 
-            # --- КЛЮЧЕВОЕ ИСПРАВЛЕНИЕ ---
-            # Ищем не непосредственного соседа, а первый тег 'a' после тега 'p'.
-            # Это игнорирует любые <br> и другие теги между ними.
+
             link_a = summary_p.find_next("a") if summary_p else None
-            # ----------------------------
+
 
             if title and summary_p and link_a and link_a.has_attr("href"):
                 news_items.append(
@@ -177,7 +168,6 @@ def parse_digest_page(digest_url: str) -> list[dict] | None:
                     }
                 )
             else:
-                # Добавим лог, чтобы понять, что именно пошло не так для конкретной новости
                 logging.warning(
                     f"Не удалось полностью разобрать новость с заголовком '{title[:50]}...'. Пропускаем."
                 )
@@ -208,11 +198,10 @@ async def fetch_full_article_text(session, url: str) -> str:
     Асинхронно загружает и парсит полный текст ОДНОЙ СТАТЬИ.
     Игнорирует страницы, не являющиеся статьями (например, карточки компаний).
     """
-    # --- КЛЮЧЕВОЕ ИЗМЕНЕНИЕ: Проверяем, что это ссылка на новость ---
     if "/news/" not in url:
         logging.info(f"Пропускаем URL (не является новостью): {url}")
         return "Это ссылка на карточку компании или другой раздел, а не на статью."
-    # -------------------------------------------------------------
+
 
     try:
         logging.info(f"Загружаю полный текст статьи: {url}")
@@ -235,7 +224,6 @@ async def fetch_full_article_text(session, url: str) -> str:
         return f"Ошибка загрузки: {e}"
 
 
-# --- 3. ГЛАВНАЯ ФУНКЦИЯ-ОРКЕСТРАТОР ---
 
 
 async def get_latest_agro_news() -> dict:
@@ -293,7 +281,6 @@ async def get_latest_agro_news() -> dict:
     return {"status": "success", "data": news_list}
 
 
-# --- 4. БЛОК ДЛЯ ТЕСТИРОВАНИЯ ---
 
 if __name__ == "__main__":
     if asyncio.get_event_loop().is_running():
